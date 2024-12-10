@@ -41,8 +41,8 @@ class VersionCheckerPlugin @Inject constructor(
 ), PluginConstraints {
 
     enum class GracePeriod(val warning: Long, val old: Long, val veryOld: Long) {
-        RELEASE(9997, 9998, 9999),
-        RC(9997, 9998, 9999)
+        RELEASE(30, 60, 90),
+        RC(7, 14, 28)
     }
 
     private val gracePeriod: GracePeriod
@@ -64,7 +64,7 @@ class VersionCheckerPlugin @Inject constructor(
         if (lastCheckOlderThan(gracePeriod.veryOld.daysToMillis()))
             value.set(false, rh.gs(R.string.very_old_version), this)
         val endDate = sp.getLong(rh.gs(app.aaps.core.utils.R.string.key_app_expiration) + "_" + config.VERSION_NAME, 0)
-        if (endDate != 0L && dateUtil.now() > endDate)
+        if (endDate != 0L && dateUtil.now() > (endDate + gracePeriod.veryOld.daysToMillis()))
             value.set(false, rh.gs(R.string.application_expired), this)
         return value
     }
