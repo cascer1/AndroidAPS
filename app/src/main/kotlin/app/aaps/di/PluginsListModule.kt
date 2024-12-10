@@ -34,7 +34,6 @@ import app.aaps.plugins.sensitivity.SensitivityWeightedAveragePlugin
 import app.aaps.plugins.smoothing.AvgSmoothingPlugin
 import app.aaps.plugins.smoothing.ExponentialSmoothingPlugin
 import app.aaps.plugins.smoothing.NoSmoothingPlugin
-import app.aaps.plugins.source.AidexPlugin
 import app.aaps.plugins.source.DexcomPlugin
 import app.aaps.plugins.source.GlimpPlugin
 import app.aaps.plugins.source.GlunovoPlugin
@@ -236,19 +235,19 @@ abstract class PluginsListModule {
     abstract fun bindLoopPlugin(plugin: LoopPlugin): PluginBase
 
     @Binds
-    @APS
+    @AllConfigs
     @IntoMap
     @IntKey(210)
     abstract fun bindOpenAPSAMAPlugin(plugin: OpenAPSAMAPlugin): PluginBase
 
     @Binds
-    @APS
+    @AllConfigs
     @IntoMap
     @IntKey(220)
     abstract fun bindOpenAPSSMBPlugin(plugin: OpenAPSSMBPlugin): PluginBase
 
     @Binds
-    @APS
+    @AllConfigs
     @IntoMap
     @IntKey(225)
     abstract fun bindOpenAPSAutoISFPlugin(plugin: OpenAPSAutoISFPlugin): PluginBase
@@ -420,12 +419,6 @@ abstract class PluginsListModule {
     @IntoMap
     @IntKey(460)
     abstract fun bindTomatoPlugin(plugin: TomatoPlugin): PluginBase
-
-    @Binds
-    @AllConfigs
-    @IntoMap
-    @IntKey(465)
-    abstract fun bindAidexPlugin(plugin: AidexPlugin): PluginBase
 
     @Binds
     @AllConfigs
