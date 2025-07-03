@@ -28,9 +28,9 @@ class VersionCheckerPlugin @Inject constructor(
 ) : PluginBaseWithPreferences(
     pluginDescription = PluginDescription()
         .mainType(PluginType.CONSTRAINTS)
-        .neverVisible(true)
-        .alwaysEnabled(true)
-        .showInList { false }
+        .neverVisible(false)
+        .alwaysEnabled(false)
+        .showInList { true }
         .pluginName(R.string.version_checker),
     ownPreferences = listOf(VersionCheckerLongKey::class.java),
     aapsLogger, rh, preferences
