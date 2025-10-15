@@ -103,7 +103,6 @@
     <string name="name_short">שם:</string>
     <string name="time">זמן</string>
     <string name="ns_wifi_ssids">WiFi SSID</string>
-    <string name="loading">טוען…</string>
     <string name="notes_label">הערות</string>
     <string name="remove_button">הסרה</string>
     <string name="add_new">הוספת חדש</string>
@@ -152,6 +151,7 @@
     <string name="treatments_wizard_basaliob_label">בזאלי פעיל</string>
     <string name="invalid">לא חוקי</string>
     <string name="login">התחברות</string>
+    <string name="logout">התנתקות</string>
     <string name="prime_fill">תיחול\\מילוי</string>
     <string name="overview_insulin_label">אינסולין</string>
     <string name="stoptemptarget">הפסקת ערך מטרה זמני</string>
