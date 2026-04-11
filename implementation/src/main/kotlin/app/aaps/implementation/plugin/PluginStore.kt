@@ -24,7 +24,7 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PermissionGroup
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
-import app.aaps.core.interfaces.profile.ProfileSource
+
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.smoothing.Smoothing
@@ -230,12 +230,8 @@ class PluginStore @Inject constructor(
     override val activeBgSource: BgSource
         get() = activeBgSourceStore ?: checkNotNull(activeBgSourceStore) { "No bg source selected" }
 
-    override val activeProfileSource: ProfileSource
-        get() = getSpecificPluginsListByInterface(ProfileSource::class.java).first() as ProfileSource
-
-    // App may not be initialized yet. Wait before second return
-    override val activeAPS: APS
-        get() = activeAPSStore ?: checkNotNull(activeAPSStore) { "No APS selected" }
+    override val activeAPS: APS?
+        get() = activeAPSStore
 
     override val activePump: PumpWithConcentration
         get() = pumpWithConcentration.get()
@@ -271,11 +267,11 @@ class PluginStore @Inject constructor(
 
     @Suppress("UNCHECKED_CAST")
     override val firstActiveSync: Sync?
-        get() = (getSpecificPluginsList(PluginType.SYNC) as ArrayList<Sync>).firstOrNull { it.connected }
+        get() = (getSpecificPluginsListByInterface(Sync::class.java) as ArrayList<Sync>).firstOrNull { it.connected }
 
     @Suppress("UNCHECKED_CAST")
     override val activeSyncs: ArrayList<Sync>
-        get() = getSpecificPluginsList(PluginType.SYNC) as ArrayList<Sync>
+        get() = getSpecificPluginsListByInterface(Sync::class.java) as ArrayList<Sync>
 
     override fun getPluginsList(): ArrayList<PluginBase> = ArrayList(plugins)
 
