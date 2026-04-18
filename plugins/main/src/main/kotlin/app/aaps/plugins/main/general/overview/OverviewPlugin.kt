@@ -14,18 +14,12 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSSettingsStatus
 import app.aaps.core.interfaces.overview.Overview
 import app.aaps.core.interfaces.overview.OverviewData
-import app.aaps.core.interfaces.overview.OverviewMenus
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.AapsSchedulers
-import app.aaps.core.interfaces.rx.bus.RxBus
-import app.aaps.core.interfaces.rx.events.EventIobCalculationProgress
-import app.aaps.core.interfaces.rx.events.EventPumpStatusChanged
-import app.aaps.core.interfaces.rx.events.EventUpdateOverviewCalcProgress
 import app.aaps.core.interfaces.ui.UiInteraction
-import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.LongComposedKey
@@ -38,8 +32,6 @@ import app.aaps.core.objects.extensions.store
 import app.aaps.plugins.main.R
 import app.aaps.plugins.main.general.overview.keys.OverviewStringKey
 import app.aaps.shared.impl.rx.bus.RxBusImpl
-import io.reactivex.rxjava3.disposables.CompositeDisposable
-import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,11 +41,8 @@ class OverviewPlugin @Inject constructor(
     aapsLogger: AAPSLogger,
     rh: ResourceHelper,
     preferences: Preferences,
-    private val fabricPrivacy: FabricPrivacy,
-    private val rxBus: RxBus,
-    private val aapsSchedulers: AapsSchedulers,
+    aapsSchedulers: AapsSchedulers,
     private val overviewData: OverviewData,
-    private val overviewMenus: OverviewMenus,
     private val context: Context,
     private val constraintsChecker: ConstraintsChecker,
     private val uiInteraction: UiInteraction,
@@ -65,11 +54,9 @@ class OverviewPlugin @Inject constructor(
 ) : PluginBaseWithPreferences(
     pluginDescription = PluginDescription()
         .mainType(PluginType.GENERAL)
-        .fragmentClass(OverviewFragment::class.qualifiedName)
         .alwaysVisible(true)
         .alwaysEnabled(true)
         .simpleModePosition(PluginDescription.Position.TAB)
-        .pluginIcon(app.aaps.core.ui.R.drawable.ic_home)
         .pluginName(app.aaps.core.ui.R.string.overview)
         .shortName(R.string.overview_shortname)
         .description(R.string.description_overview),
@@ -77,36 +64,13 @@ class OverviewPlugin @Inject constructor(
     aapsLogger, rh, preferences
 ), Overview {
 
-    private var disposable: CompositeDisposable = CompositeDisposable()
-
     override val overviewBus = RxBusImpl(aapsSchedulers, aapsLogger)
 
     override fun onStart() {
         super.onStart()
-        overviewMenus.loadGraphConfig()
         overviewData.initRange()
 
         notificationManager.createNotificationChannel()
-
-        disposable += rxBus
-            .toObservable(EventIobCalculationProgress::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           overviewData.calcProgressPct = it.finalPercent
-                           overviewBus.send(EventUpdateOverviewCalcProgress("EventIobCalculationProgress"))
-                       }, fabricPrivacy::logException)
-        disposable += rxBus
-            .toObservable(EventPumpStatusChanged::class.java)
-            .observeOn(aapsSchedulers.io)
-            .subscribe({
-                           overviewData.pumpStatus = it.getStatus(context)
-                       }, fabricPrivacy::logException)
-
-    }
-
-    override fun onStop() {
-        disposable.clear()
-        super.onStop()
     }
 
     override fun configuration(): JsonObject =

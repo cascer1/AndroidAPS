@@ -5,9 +5,6 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.os.PersistableBundle
 import android.util.TypedValue
-import android.view.Menu
-import android.view.MenuInflater
-import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -18,9 +15,6 @@ import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.widget.Toolbar
 import androidx.core.view.GravityCompat
-import androidx.core.view.MenuCompat
-import androidx.core.view.MenuProvider
-import app.aaps.activities.HistoryBrowseActivity
 import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ConfigBuilder
@@ -35,7 +29,6 @@ import app.aaps.core.interfaces.rx.events.EventRebuildTabs
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
-import app.aaps.core.keys.StringKey
 import app.aaps.core.ui.UIRunnable
 import app.aaps.core.ui.locale.LocaleHelper
 import app.aaps.databinding.ActivityMainBinding
@@ -75,11 +68,8 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
     @Inject lateinit var notificationManager: NotificationManager
 
     private lateinit var actionBarDrawerToggle: ActionBarDrawerToggle
-    private var menu: Menu? = null
-    private var menuOpen = false
     private var isProtectionCheckActive = false
     private lateinit var binding: ActivityMainBinding
-    private var mainMenuProvider: MenuProvider? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -110,7 +100,6 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
         val newScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
         scope = newScope
         preferences.observe(BooleanKey.OverviewKeepScreenOn).drop(1).onEach { setWakeLock() }.launchIn(newScope)
-        preferences.observe(StringKey.GeneralSkin).drop(1).onEach { recreate() }.launchIn(newScope)
         disposable += rxBus
             .toObservable(EventAppInitialized::class.java)
             .observeOn(aapsSchedulers.main)
@@ -122,32 +111,11 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
             override fun handleOnBackPressed() {
                 if (binding.mainDrawerLayout.isDrawerOpen(GravityCompat.START))
                     binding.mainDrawerLayout.closeDrawers()
-                else if (menuOpen)
-                    menu?.close()
                 else if (binding.mainPager.currentItem != 0)
                     binding.mainPager.currentItem = 0
                 else finish()
             }
         })
-        mainMenuProvider = object : MenuProvider {
-            override fun onCreateMenu(menu: Menu, menuInflater: MenuInflater) {
-                MenuCompat.setGroupDividerEnabled(menu, true)
-                this@MainActivity.menu = menu
-                menuInflater.inflate(R.menu.menu_main, menu)
-            }
-
-            override fun onMenuItemSelected(menuItem: MenuItem): Boolean =
-                when (menuItem.itemId) {
-                    R.id.nav_historybrowser -> {
-                        startActivity(Intent(this@MainActivity, HistoryBrowseActivity::class.java).setAction("info.nightscout.androidaps.MainActivity"))
-                        true
-                    }
-
-                    else                    ->
-                        actionBarDrawerToggle.onOptionsItemSelected(menuItem)
-                }
-        }
-        mainMenuProvider?.let { addMenuProvider(it) }
         // Setup views on 2nd and next activity start
         // On 1st start app is still initializing, start() is delayed and run from EventAppInitialized
         if (config.appInitialized) setupViews()
@@ -167,7 +135,6 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
         super.onDestroy()
         binding.mainPager.adapter = null
         binding.mainDrawerLayout.removeDrawerListener(actionBarDrawerToggle)
-        mainMenuProvider?.let { removeMenuProvider(it) }
         scope?.cancel()
         scope = null
         disposable.clear()
@@ -210,8 +177,7 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
                 ) {
                     val menuItem = menu.add(p.name)
                     menuItem.isCheckable = true
-                    if (p.menuIcon != -1) menuItem.setIcon(p.menuIcon)
-                    else menuItem.setIcon(app.aaps.core.ui.R.drawable.ic_settings)
+                    menuItem.setIcon(app.aaps.core.ui.R.drawable.ic_settings)
                     menuItem.setOnMenuItemClickListener {
                         startActivity(
                             Intent(this, SingleFragmentActivity::class.java)
@@ -260,19 +226,6 @@ class MainActivity : DaggerAppCompatActivityWithResult() {
             }
         }
         return super.dispatchTouchEvent(event)
-    }
-
-    override fun onMenuOpened(featureId: Int, menu: Menu): Boolean {
-        menuOpen = true
-        if (binding.mainDrawerLayout.isDrawerOpen(GravityCompat.START)) {
-            binding.mainDrawerLayout.closeDrawers()
-        }
-        return super.onMenuOpened(featureId, menu)
-    }
-
-    override fun onPanelClosed(featureId: Int, menu: Menu) {
-        menuOpen = false
-        super.onPanelClosed(featureId, menu)
     }
 
 }

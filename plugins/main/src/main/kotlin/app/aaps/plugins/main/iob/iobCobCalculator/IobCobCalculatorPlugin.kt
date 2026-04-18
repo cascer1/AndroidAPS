@@ -26,6 +26,7 @@ import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.overview.OverviewData
+import app.aaps.core.interfaces.overview.graph.OverviewDataCache
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginDescription
@@ -41,6 +42,7 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.MidnightTime
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
+import app.aaps.core.interfaces.workflow.CalculationSignalsEmitter
 import app.aaps.core.interfaces.workflow.CalculationWorkflow
 import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
@@ -71,6 +73,7 @@ import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
+import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.max
 import kotlin.math.min
@@ -90,7 +93,12 @@ class IobCobCalculatorPlugin @Inject constructor(
     private val overviewData: OverviewData,
     private val calculationWorkflow: CalculationWorkflow,
     private val decimalFormatter: DecimalFormatter,
-    private val processedTbrEbData: ProcessedTbrEbData
+    private val processedTbrEbData: ProcessedTbrEbData,
+    private val signals: CalculationSignalsEmitter,
+    // Lazy cache reference: IobCobCalculator and OverviewDataCache form a Dagger
+    // cycle (Loop transitively pulls IobCobCalculator). Provider breaks it;
+    // runCalculation is only invoked post-construction so .get() is always safe.
+    private val cache: Provider<OverviewDataCache>
 ) : PluginBase(
     PluginDescription()
         .mainType(PluginType.GENERAL)
@@ -167,14 +175,6 @@ class IobCobCalculatorPlugin @Inject constructor(
         persistenceLayer.observeChanges(EB::class.java)
             .onEach { list -> list.minOfOrNull { it.timestamp }?.let { scheduleHistoryDataChange(it, reloadBgData = false) } }
             .launchIn(newScope)
-        // TherapyEvent changes
-        persistenceLayer.observeChanges(TE::class.java)
-            .onEach { calculationWorkflow.runOnEventTherapyEventChange(overviewData) }
-            .launchIn(newScope)
-        // RunningMode changes
-        persistenceLayer.observeChanges(RM::class.java)
-            .onEach { calculationWorkflow.runOnEventTherapyEventChange(overviewData) }
-            .launchIn(newScope)
         // Units change
         preferences.observe(StringKey.GeneralUnits).drop(1)
             .onEach {
@@ -190,6 +190,8 @@ class IobCobCalculatorPlugin @Inject constructor(
                         CalculationWorkflow.MAIN_CALCULATION,
                         this,
                         overviewData,
+                        cache.get(),
+                        signals,
                         "onEventAppInitialized",
                         System.currentTimeMillis(),
                         bgDataReload = true,
@@ -218,6 +220,8 @@ class IobCobCalculatorPlugin @Inject constructor(
             job = CalculationWorkflow.MAIN_CALCULATION,
             iobCobCalculator = this,
             overviewData = overviewData,
+            cache = cache.get(),
+            signals = signals,
             reason = reason,
             end = System.currentTimeMillis(),
             bgDataReload = true,
@@ -514,6 +518,8 @@ class IobCobCalculatorPlugin @Inject constructor(
             job = CalculationWorkflow.MAIN_CALCULATION,
             iobCobCalculator = this,
             overviewData = overviewData,
+            cache = cache.get(),
+            signals = signals,
             reason = if (triggeredByNewBG) "NewBG" else "DBChange",
             end = System.currentTimeMillis(),
             bgDataReload = bgDataReload,
