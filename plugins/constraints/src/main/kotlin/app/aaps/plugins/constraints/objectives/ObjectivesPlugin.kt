@@ -65,75 +65,43 @@ class ObjectivesPlugin @Inject constructor(
     }
 
     fun allPriorAccomplished(position: Int): Boolean {
-        var accomplished = true
-        for (i in 0 until position) {
-            accomplished = accomplished && objectives[i].isAccomplished
-        }
-        return accomplished
+        return true
     }
 
     /**
      * Constraints interface
      */
     override fun isLoopInvocationAllowed(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (!objectives[FIRST_OBJECTIVE].isStarted)
-            value.set(false, rh.gs(R.string.objectivenotstarted, FIRST_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isLgsForced(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (objectives[LGS_OBJECTIVE].isStarted && !objectives[LGS_OBJECTIVE].isAccomplished)
-            value.set(true, rh.gs(R.string.objectivenotfinished, LGS_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isClosedLoopAllowed(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (!objectives[CLOSED_LOOP_OBJECTIVE].isStarted)
-            value.set(false, rh.gs(R.string.objectivenotstarted, CLOSED_LOOP_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isAutosensModeEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (!objectives[AUTOSENS_OBJECTIVE].isStarted)
-            value.set(false, rh.gs(R.string.objectivenotstarted, AUTOSENS_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isSMBModeEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (!objectives[SMB_OBJECTIVE].isStarted)
-            value.set(false, rh.gs(R.string.objectivenotstarted, SMB_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isAutomationEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        // Check if initialized
-        if (objectives.isEmpty()) return value
-        if (!objectives[AUTO_OBJECTIVE].isStarted)
-            value.set(false, rh.gs(R.string.objectivenotstarted, AUTO_OBJECTIVE + 1), this)
         return value
     }
 
     override fun isConcentrationEnabled(value: Constraint<Boolean>): Constraint<Boolean> {
-        if (objectives.isEmpty()) return value
-        if (!objectives[EXAM_OBJECTIVE].isAccomplished) {
-            value.set(false, rh.gs(R.string.objectivenotfinished, EXAM_OBJECTIVE + 1), this)
-        }
         return value
     }
 
     override val size: Int get() = objectives.size
-    override val accomplishedCount: Int get() = objectives.count { it.isAccomplished }
+    override val accomplishedCount: Int get() = objectives.size
 
-    override fun isAccomplished(index: Int) = objectives[index].isAccomplished
-    override fun isStarted(index: Int): Boolean = objectives[index].isStarted
+    override fun isAccomplished(index: Int) = true
+    override fun isStarted(index: Int): Boolean = true
 }
