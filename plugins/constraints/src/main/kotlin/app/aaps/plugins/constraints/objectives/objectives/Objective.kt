@@ -52,6 +52,8 @@ abstract class Objective(
         return true
     }
 
+    val isAccomplished: Boolean
+        get() = true
     val isStarted: Boolean
         get() = startedOn != 0L
 
