@@ -53,9 +53,11 @@ import app.aaps.wear.interaction.WatchfaceConfigurationActivity
 import app.aaps.wear.interaction.actions.AcceptActivity
 import app.aaps.wear.interaction.actions.ProfileSwitchActivity
 import app.aaps.wear.tile.ActionsTileService
+import app.aaps.wear.tile.BgGraphTileService
 import app.aaps.wear.tile.RunningModeTileService
 import app.aaps.wear.tile.QuickWizardTileService
 import app.aaps.wear.tile.TempTargetTileService
+import app.aaps.wear.tile.SceneTileService
 import app.aaps.wear.tile.UserActionTileService
 import com.google.android.gms.wearable.WearableListenerService
 import io.reactivex.rxjava3.disposables.CompositeDisposable
@@ -231,6 +233,7 @@ class DataHandlerWear @Inject constructor(
 
                     // Trigger complications AFTER DataStore write completes
                     triggerComplicationUpdates()
+                    TileService.getUpdater(context).requestUpdate(BgGraphTileService::class.java)
                 }
 
                 LocalBroadcastManager.getInstance(context).sendBroadcast(Intent(DataLayerListenerServiceWear.INTENT_NEW_DATA))
@@ -297,6 +300,17 @@ class DataHandlerWear @Inject constructor(
                 if (serialized != sp.getString(R.string.key_user_action_data, "")) {
                     sp.putString(R.string.key_user_action_data, serialized)
                     TileService.getUpdater(context).requestUpdate(UserActionTileService::class.java)
+                }
+            }
+        disposable += rxBus
+            .toObservable(EventData.SceneList::class.java)
+            .observeOn(aapsSchedulers.io)
+            .subscribe {
+                aapsLogger.debug(LTag.WEAR, "SceneList received from ${it.sourceNodeId}")
+                val serialized = it.serialize()
+                if (serialized != sp.getString(R.string.key_scene_data, "")) {
+                    sp.putString(R.string.key_scene_data, serialized)
+                    TileService.getUpdater(context).requestUpdate(SceneTileService::class.java)
                 }
             }
         disposable += rxBus
