@@ -10,13 +10,14 @@ import app.aaps.core.data.model.SceneAction
 import app.aaps.core.data.model.SceneEndAction
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.model.TTPreset
-import app.aaps.core.interfaces.profile.LocalProfileManager
+import app.aaps.core.interfaces.profile.ProfileRepository
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.tempTargets.toTTPresets
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.Translator
 import app.aaps.core.keys.StringNonKey
+import app.aaps.core.objects.extensions.profileNames
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.ui.compose.scenes.SceneRepository
 import app.aaps.ui.compose.scenes.SceneTemplate
@@ -37,7 +38,7 @@ import javax.inject.Inject
 class SceneWizardViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val sceneRepository: SceneRepository,
-    private val localProfileManager: LocalProfileManager,
+    private val profileRepository: ProfileRepository,
     private val profileUtil: ProfileUtil,
     private val preferences: Preferences,
     private val translator: Translator,
@@ -67,13 +68,13 @@ class SceneWizardViewModel @Inject constructor(
         val profileEnabled: Boolean = false,
         val ttEnabled: Boolean = false,
         val smbEnabled: Boolean = false,
-        val loopModeEnabled: Boolean = false,
+        val runningModeEnabled: Boolean = false,
         val carePortalEnabled: Boolean = false,
         // Action configs
         val profileAction: SceneAction.ProfileSwitch = SceneAction.ProfileSwitch(profileName = "", percentage = 100),
         val ttAction: SceneAction.TempTarget? = null,
         val smbAction: SceneAction.SmbToggle = SceneAction.SmbToggle(enabled = false),
-        val loopModeAction: SceneAction.LoopModeChange = SceneAction.LoopModeChange(mode = RM.Mode.CLOSED_LOOP_LGS),
+        val runningModeAction: SceneAction.LoopModeChange = SceneAction.LoopModeChange(mode = RM.Mode.CLOSED_LOOP_LGS),
         val carePortalAction: SceneAction.CarePortalEvent = SceneAction.CarePortalEvent(type = TE.Type.EXERCISE),
         // Metadata
         val durationMinutes: Int = 60,
@@ -107,12 +108,12 @@ class SceneWizardViewModel @Inject constructor(
             profileEnabled = profileAction != null,
             ttEnabled = ttAction != null,
             smbEnabled = smbAction != null,
-            loopModeEnabled = loopModeAction != null,
+            runningModeEnabled = loopModeAction != null,
             carePortalEnabled = carePortalAction != null,
             profileAction = profileAction ?: SceneAction.ProfileSwitch(profileName = "", percentage = 100),
             ttAction = ttAction,
             smbAction = smbAction ?: SceneAction.SmbToggle(enabled = false),
-            loopModeAction = loopModeAction ?: SceneAction.LoopModeChange(mode = RM.Mode.CLOSED_LOOP_LGS),
+            runningModeAction = loopModeAction ?: SceneAction.LoopModeChange(mode = RM.Mode.CLOSED_LOOP_LGS),
             carePortalAction = carePortalAction ?: SceneAction.CarePortalEvent(type = TE.Type.EXERCISE),
             durationMinutes = scene.defaultDurationMinutes,
             chainTargetId = (scene.endAction as? SceneEndAction.ChainScene)?.sceneId
@@ -132,13 +133,13 @@ class SceneWizardViewModel @Inject constructor(
         )
 
     val profileNames: List<String>
-        get() = localProfileManager.profile?.getProfileList()?.map { it.toString() } ?: emptyList()
+        get() = profileRepository.profileNames()
 
     val ttPresets: List<TTPreset>
         get() = preferences.get(StringNonKey.TempTargetPresets).toTTPresets()
 
     fun formatBgWithUnits(mgdl: Double): String =
-        "${profileUtil.fromMgdlToStringInUnits(mgdl)} ${profileUtil.units.asText}"
+        profileUtil.fromMgdlToStringWithUnits(mgdl)
 
     fun translateEventType(type: TE.Type): String = translator.translate(type)
 
@@ -170,12 +171,12 @@ class SceneWizardViewModel @Inject constructor(
             profileEnabled = hasAction(SceneAction.ProfileSwitch::class.java),
             ttEnabled = hasAction(SceneAction.TempTarget::class.java),
             smbEnabled = hasAction(SceneAction.SmbToggle::class.java),
-            loopModeEnabled = hasAction(SceneAction.LoopModeChange::class.java),
+            runningModeEnabled = hasAction(SceneAction.LoopModeChange::class.java),
             carePortalEnabled = hasAction(SceneAction.CarePortalEvent::class.java),
             profileAction = profileAction,
             ttAction = ttAction,
             smbAction = smbAction,
-            loopModeAction = loopModeAction,
+            runningModeAction = loopModeAction,
             carePortalAction = carePortalAction,
             durationMinutes = template.defaultDurationMinutes,
             name = if (template == SceneTemplate.BLANK) "" else templateName,
@@ -213,7 +214,7 @@ class SceneWizardViewModel @Inject constructor(
     }
 
     fun setLoopModeEnabled(enabled: Boolean) {
-        _state.update { it.copy(loopModeEnabled = enabled) }
+        _state.update { it.copy(runningModeEnabled = enabled) }
     }
 
     fun setCarePortalEnabled(enabled: Boolean) {
@@ -233,7 +234,7 @@ class SceneWizardViewModel @Inject constructor(
     }
 
     fun updateLoopModeAction(action: SceneAction) {
-        if (action is SceneAction.LoopModeChange) _state.update { it.copy(loopModeAction = action) }
+        if (action is SceneAction.LoopModeChange) _state.update { it.copy(runningModeAction = action) }
     }
 
     fun updateCarePortalAction(action: SceneAction) {
@@ -270,7 +271,7 @@ class SceneWizardViewModel @Inject constructor(
             if (s.profileEnabled) add(s.profileAction)
             if (s.ttEnabled && s.ttAction != null) add(s.ttAction)
             if (s.smbEnabled) add(s.smbAction)
-            if (s.loopModeEnabled) add(s.loopModeAction)
+            if (s.runningModeEnabled) add(s.runningModeAction)
             if (s.carePortalEnabled) add(s.carePortalAction)
         }
 
