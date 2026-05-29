@@ -111,7 +111,7 @@ android {
             manifestPlaceholders["appIconRound"] = "@mipmap/ic_launcher_round"
         }
         create("pumpcontrol") {
-            applicationId = "info.nightscout.aapspumpcontrol"
+            applicationId = "eu.vobar.aapspumpcontrol"
             dimension = "standard"
             resValue("string", "app_name", "Pumpcontrol")
             versionName = Versions.appVersion + "-pumpcontrol"
@@ -119,7 +119,7 @@ android {
             manifestPlaceholders["appIconRound"] = "@null"
         }
         create("aapsclient") {
-            applicationId = "info.nightscout.aapsclient"
+            applicationId = "eu.vobar.aapsclient"
             dimension = "standard"
             resValue("string", "app_name", "AAPSClient")
             versionName = Versions.appVersion + "-aapsclient"
@@ -127,7 +127,7 @@ android {
             manifestPlaceholders["appIconRound"] = "@mipmap/ic_yellowowl"
         }
         create("aapsclient2") {
-            applicationId = "info.nightscout.aapsclient2"
+            applicationId = "eu.vobar.aapsclient2"
             dimension = "standard"
             resValue("string", "app_name", "AAPSClient2")
             versionName = Versions.appVersion + "-aapsclient"
@@ -135,7 +135,7 @@ android {
             manifestPlaceholders["appIconRound"] = "@mipmap/ic_blueowl"
         }
         create("aapsclient3") {
-            applicationId = "info.nightscout.aapsclient3"
+            applicationId = "eu.vobar.aapsclient3"
             dimension = "standard"
             resValue("string", "app_name", "AAPSClient3")
             versionName = Versions.appVersion + "-aapsclient3"
