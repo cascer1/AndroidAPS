@@ -119,6 +119,7 @@ class TranslatorImpl @Inject internal constructor(
         Action.CHANGE_INSULIN_CONCENTRATION    -> rh.gs(R.string.uel_change_insulin_concentration)
         Action.SCENE_ACTIVATED                 -> rh.gs(R.string.uel_scene_activated)
         Action.SCENE_DEACTIVATED               -> rh.gs(R.string.uel_scene_deactivated)
+        Action.REMOTE_CONFIG_CHANGED           -> rh.gs(R.string.uel_remote_config_changed)
         Action.UNKNOWN                         -> rh.gs(R.string.unknown)
     }
 
@@ -200,6 +201,8 @@ class TranslatorImpl @Inject internal constructor(
         TE.Location.FRONT_LEFT_LOWER_ABDOMEN  -> rh.gs(R.string.location_front_left_lower_abdomen)
         TE.Location.BACK_RIGHT_BUTTOCK        -> rh.gs(R.string.location_back_right_buttock)
         TE.Location.BACK_LEFT_BUTTOCK         -> rh.gs(R.string.location_back_left_buttock)
+        TE.Location.BACK_RIGHT_LOWER_BACK     -> rh.gs(R.string.location_back_right_lower_back)
+        TE.Location.BACK_LEFT_LOWER_BACK      -> rh.gs(R.string.location_back_left_lower_back)
         TE.Location.FRONT_RIGHT_UPPER_THIGH   -> rh.gs(R.string.location_front_right_upper_thigh)
         TE.Location.FRONT_LEFT_UPPER_THIGH    -> rh.gs(R.string.location_front_left_upper_thigh)
         TE.Location.FRONT_RIGHT_LOWER_THIGH   -> rh.gs(R.string.location_front_right_lower_thigh)

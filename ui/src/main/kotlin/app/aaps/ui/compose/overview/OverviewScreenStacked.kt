@@ -49,6 +49,7 @@ fun OverviewScreenStacked(
     tempTargetSceneManaged: Boolean = false,
     runningMode: RM.Mode,
     runningModeText: String,
+    runningModeRemaining: String,
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
     tbrState: TbrState,
@@ -62,11 +63,13 @@ fun OverviewScreenStacked(
     statusLightsDef: PreferenceSubScreenDef,
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
+    onIobChipClick: () -> Unit,
     paddingValues: PaddingValues,
     activeSceneState: ActiveSceneState? = null,
     sceneExpired: Boolean = false,
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
+    endSceneEnabled: Boolean = true,
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
     modifier: Modifier = Modifier
 ) {
@@ -98,6 +101,7 @@ fun OverviewScreenStacked(
             expired = sceneExpired,
             onEndClick = onEndScene,
             onDismiss = onDismissScene,
+            endEnabled = endSceneEnabled,
             formatDuration = formatDuration
         )
         Row(
@@ -113,16 +117,15 @@ fun OverviewScreenStacked(
                     bgInfo = bgInfoState.bgInfo,
                     timeAgoText = bgInfoState.timeAgoText
                 )
-                SensitivityChipBlock(state = sensitivityUiState)
             }
 
             OverviewChipsColumn(
                 runningMode = runningMode,
                 runningModeText = runningModeText,
+                runningModeRemaining = runningModeRemaining,
                 runningModeProgress = runningModeProgress,
                 runningModeSceneManaged = runningModeSceneManaged,
                 smbEnabled = smbEnabled,
-                isSimpleMode = isSimpleMode,
                 profileName = profileName,
                 isProfileModified = isProfileModified,
                 profileProgress = profileProgress,
@@ -135,8 +138,10 @@ fun OverviewScreenStacked(
                 tbrState = tbrState,
                 iobUiState = iobUiState,
                 cobUiState = cobUiState,
+                sensitivityUiState = sensitivityUiState,
                 onNavigate = onNavigate,
                 onTbrChipClick = onTbrChipClick,
+                onIobChipClick = onIobChipClick,
                 modifier = Modifier
                     .weight(1f)
                     .padding(start = 8.dp)

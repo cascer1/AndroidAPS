@@ -60,6 +60,7 @@ fun OverviewScreenTablet(
     tempTargetSceneManaged: Boolean = false,
     runningMode: RM.Mode,
     runningModeText: String,
+    runningModeRemaining: String,
     runningModeProgress: Float,
     runningModeSceneManaged: Boolean = false,
     tbrState: TbrState,
@@ -73,11 +74,13 @@ fun OverviewScreenTablet(
     statusLightsDef: PreferenceSubScreenDef,
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
+    onIobChipClick: () -> Unit,
     paddingValues: PaddingValues,
     activeSceneState: ActiveSceneState? = null,
     sceneExpired: Boolean = false,
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
+    endSceneEnabled: Boolean = true,
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
     modifier: Modifier = Modifier
 ) {
@@ -108,6 +111,7 @@ fun OverviewScreenTablet(
             expired = sceneExpired,
             onEndClick = onEndScene,
             onDismiss = onDismissScene,
+            endEnabled = endSceneEnabled,
             formatDuration = formatDuration
         )
 
@@ -137,7 +141,6 @@ fun OverviewScreenTablet(
                             timeAgoText = bgInfoState.timeAgoText,
                             showTimeAgo = false
                         )
-                        SensitivityChipBlock(state = sensitivityUiState)
                     }
 
                     Column(
@@ -153,10 +156,10 @@ fun OverviewScreenTablet(
                         OverviewChipsColumn(
                             runningMode = runningMode,
                             runningModeText = runningModeText,
+                            runningModeRemaining = runningModeRemaining,
                             runningModeProgress = runningModeProgress,
                             runningModeSceneManaged = runningModeSceneManaged,
                             smbEnabled = smbEnabled,
-                            isSimpleMode = isSimpleMode,
                             profileName = profileName,
                             isProfileModified = isProfileModified,
                             profileProgress = profileProgress,
@@ -169,8 +172,10 @@ fun OverviewScreenTablet(
                             tbrState = tbrState,
                             iobUiState = iobUiState,
                             cobUiState = cobUiState,
+                            sensitivityUiState = sensitivityUiState,
                             onNavigate = onNavigate,
-                            onTbrChipClick = onTbrChipClick
+                            onTbrChipClick = onTbrChipClick,
+                            onIobChipClick = onIobChipClick
                         )
                     }
                 }

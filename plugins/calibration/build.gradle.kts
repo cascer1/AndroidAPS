@@ -5,22 +5,16 @@ plugins {
     alias(libs.plugins.hilt)
     id("android-module-dependencies")
     id("test-module-dependencies")
+    id("compose-test-module-dependencies")
     id("jacoco-module-dependencies")
 }
 
 android {
     namespace = "app.aaps.plugins.calibration"
-    defaultConfig {
-        ksp {
-            arg("room.incremental", "true")
-            arg("room.schemaLocation", "$projectDir/schemas")
-        }
-    }
     buildFeatures {
         compose = true
     }
 }
-
 
 dependencies {
     implementation(project(":core:data"))
@@ -28,16 +22,15 @@ dependencies {
     implementation(project(":core:keys"))
     implementation(project(":core:ui"))
 
-    api(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
-
     // Compose
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.material3)
+    implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.runtime)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.com.google.dagger.hilt.android)
     implementation(libs.androidx.hilt.navigation.compose)
+    debugImplementation(libs.androidx.compose.ui.tooling)
 
     testImplementation(project(":shared:tests"))
     testImplementation(project(":implementation"))

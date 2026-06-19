@@ -10,7 +10,11 @@ import app.aaps.core.data.time.T
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ue.ValueWithUnit
+import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.data.ui.ConfirmationRole
+import app.aaps.core.data.ui.confirmationLines
 import app.aaps.core.interfaces.db.PersistenceLayer
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -25,6 +29,7 @@ import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.ui.compose.siteRotation.BodyType
 import app.aaps.ui.R
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,7 +49,8 @@ class CareDialogViewModel @Inject constructor(
     private val preferences: Preferences,
     val rh: ResourceHelper,
     val dateUtil: DateUtil,
-    private val aapsLogger: AAPSLogger
+    private val aapsLogger: AAPSLogger,
+    @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(CareDialogUiState())
@@ -141,44 +147,62 @@ class CareDialogViewModel @Inject constructor(
 
     private var confirmedState: CareDialogUiState? = null
 
-    fun buildConfirmationSummary(): List<String> {
+    fun buildConfirmationSummary(): List<ConfirmationLine> {
         val state = uiState.value
         confirmedState = state
-        val lines = mutableListOf<String>()
+        return confirmationLines {
+            line(ConfirmationRole.NORMAL, rh.gs(R.string.confirm_treatment))
 
-        lines.add(rh.gs(R.string.confirm_treatment))
-
-        if (state.showBgSection) {
-            lines.add(rh.gs(R.string.glucose_type) + ": " + translator.translate(state.meterType))
-            val unitResId = if (state.glucoseUnits == GlucoseUnit.MGDL)
-                app.aaps.core.ui.R.string.mgdl else app.aaps.core.ui.R.string.mmol
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.bg_label) + ": " +
-                    profileUtil.stringInCurrentUnitsDetect(state.bgValue) + " " +
+            if (state.showBgSection) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(R.string.glucose_type), translator.translate(state.meterType))
+                )
+                val unitResId = if (state.glucoseUnits == GlucoseUnit.MGDL)
+                    app.aaps.core.ui.R.string.mgdl else app.aaps.core.ui.R.string.mmol
+                val bgWithUnit = rh.gs(
+                    app.aaps.core.ui.R.string.value_with_unit,
+                    profileUtil.stringInCurrentUnitsDetect(state.bgValue),
                     rh.gs(unitResId)
-            )
-        }
+                )
+                line(
+                    ConfirmationRole.PRIMARY,
+                    rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.bg_label), bgWithUnit)
+                )
+            }
 
-        if (state.showDurationSection) {
-            lines.add(
-                rh.gs(app.aaps.core.ui.R.string.duration_label) + ": " +
-                    rh.gs(app.aaps.core.ui.R.string.format_mins, state.duration.toInt())
-            )
-        }
+            if (state.showDurationSection) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(
+                        app.aaps.core.ui.R.string.confirmation_line,
+                        rh.gs(app.aaps.core.ui.R.string.duration_label),
+                        rh.gs(app.aaps.core.ui.R.string.format_mins, state.duration.toInt())
+                    )
+                )
+            }
 
-        if (state.notes.isNotEmpty()) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.notes_label) + ": " + state.notes)
-        }
+            if (state.notes.isNotEmpty()) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.notes_label), state.notes)
+                )
+            }
 
-        if (state.eventTimeChanged) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.time) + ": " + dateUtil.dateAndTimeString(state.eventTime))
-        }
+            if (state.eventTimeChanged) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.time), dateUtil.dateAndTimeString(state.eventTime))
+                )
+            }
 
-        if (state.showSiteRotationSection && state.siteLocation != TE.Location.NONE) {
-            lines.add(rh.gs(app.aaps.core.ui.R.string.site_location) + ": " + translator.translate(state.siteLocation))
+            if (state.showSiteRotationSection && state.siteLocation != TE.Location.NONE) {
+                line(
+                    ConfirmationRole.NORMAL,
+                    rh.gs(app.aaps.core.ui.R.string.confirmation_line, rh.gs(app.aaps.core.ui.R.string.site_location), translator.translate(state.siteLocation))
+                )
+            }
         }
-
-        return lines
     }
 
     fun confirmAndSave() {
@@ -226,7 +250,9 @@ class CareDialogViewModel @Inject constructor(
         valuesWithUnit.add(0, ValueWithUnit.Timestamp(eventTime).takeIf { state.eventTimeChanged })
         valuesWithUnit.add(1, ValueWithUnit.TEType(therapyEvent.type))
 
-        viewModelScope.launch {
+        // appScope, not viewModelScope: the screen navigates back immediately after confirm,
+        // which cancels viewModelScope and could drop this therapy-event write.
+        appScope.launch {
             try {
                 persistenceLayer.insertPumpTherapyEventIfNewByTimestamp(
                     therapyEvent = therapyEvent,

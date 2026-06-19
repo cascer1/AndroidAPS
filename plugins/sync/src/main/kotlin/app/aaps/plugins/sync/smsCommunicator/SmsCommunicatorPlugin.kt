@@ -5,6 +5,7 @@ import android.content.Context
 import android.os.Bundle
 import android.telephony.SmsManager
 import android.telephony.SmsMessage
+import androidx.hilt.work.HiltWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import app.aaps.core.data.configuration.Constants
@@ -38,14 +39,13 @@ import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.PumpStatusProvider
 import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.resources.ResourceHelper
-import app.aaps.core.interfaces.rx.bus.RxBus
-import app.aaps.core.interfaces.rx.events.EventNSClientRestart
 import app.aaps.core.interfaces.smsCommunicator.Sms
 import app.aaps.core.interfaces.smsCommunicator.SmsCommunicator
 import app.aaps.core.interfaces.sync.XDripBroadcast
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.SafeParse
+import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
@@ -88,6 +88,9 @@ import app.aaps.plugins.sync.smsCommunicator.compose.SmsCommunicatorOtpScreen
 import app.aaps.plugins.sync.smsCommunicator.compose.SmsCommunicatorRepository
 import app.aaps.plugins.sync.smsCommunicator.keys.SmsIntentKey
 import app.aaps.plugins.sync.smsCommunicator.otp.OneTimePassword
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -113,7 +116,6 @@ class SmsCommunicatorPlugin @Inject constructor(
     private val smsManager: SmsManager?,
     preferences: Preferences,
     private val constraintChecker: ConstraintsChecker,
-    private val rxBus: RxBus,
     private val profileFunction: ProfileFunction,
     private val profileUtil: ProfileUtil,
     private val activePlugin: ActivePlugin,
@@ -167,7 +169,6 @@ class SmsCommunicatorPlugin @Inject constructor(
     private val commands = mapOf(
         "BG" to "BG",
         "LOOP" to "LOOP STOP/DISABLE/RESUME/STATUS/CLOSED/LGS\nLOOP SUSPEND 20",
-        "AAPSCLIENT" to "AAPSCLIENT RESTART",
         "PUMP" to "PUMP\nPUMP CONNECT\nPUMP DISCONNECT 30\n",
         "BASAL" to "BASAL STOP/CANCEL\nBASAL 0.3\nBASAL 0.3 20\nBASAL 30%\nBASAL 30% 20\n",
         "BOLUS" to "BOLUS 1.2\nBOLUS 1.2 MEAL",
@@ -207,13 +208,15 @@ class SmsCommunicatorPlugin @Inject constructor(
     }
 
     // cannot be inner class because of needed injection
-    class SmsCommunicatorWorker(
-        context: Context,
-        params: WorkerParameters
-    ) : LoggingWorker(context, params, Dispatchers.IO) {
-
-        @Inject lateinit var smsCommunicatorPlugin: SmsCommunicatorPlugin
-        @Inject lateinit var dataInbox: DataInbox
+    @HiltWorker
+    class SmsCommunicatorWorker @AssistedInject constructor(
+        @Assisted context: Context,
+        @Assisted params: WorkerParameters,
+        aapsLogger: AAPSLogger,
+        fabricPrivacy: FabricPrivacy,
+        private val smsCommunicatorPlugin: SmsCommunicatorPlugin,
+        private val dataInbox: DataInbox
+    ) : LoggingWorker(context, params, Dispatchers.IO, aapsLogger, fabricPrivacy) {
 
         override suspend fun doWorkAndLog(): Result {
             val bundles = dataInbox.drain(SmsInbox)
@@ -222,6 +225,14 @@ class SmsCommunicatorPlugin @Inject constructor(
             for (bundle in bundles) {
                 try {
                     processBundle(bundle)
+                } catch (e: CancellationException) {
+                    // WorkManager stopped this run. The coroutine contract requires
+                    // CancellationException to propagate, otherwise the loop keeps fighting a
+                    // cancelled Job and spams failures for every remaining bundle. Unlike the CGM
+                    // workers we deliberately do NOT re-queue: SMS bundles carry non-idempotent
+                    // remote commands, so re-processing risks double-execution. A cancelled command
+                    // is dropped (the user re-sends) rather than re-run.
+                    throw e
                 } catch (e: Exception) {
                     aapsLogger.error(LTag.SMS, "Failed processing SMS bundle", e)
                     hadFailure = true
@@ -293,76 +304,74 @@ class SmsCommunicatorPlugin @Inject constructor(
 
         if (divided.isNotEmpty() && isCommand(divided[0].uppercase(Locale.getDefault()), receivedSms.phoneNumber)) {
             when (divided[0].uppercase(Locale.getDefault())) {
-                "BG"         ->
+                "BG"       ->
                     if (divided.size == 1) processBG(receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "LOOP"       ->
+                "LOOP"     ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processLOOP(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "AAPSCLIENT" ->
-                    if (divided.size == 2) processNSCLIENT(divided, receivedSms)
-                    else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
-
-                "PUMP"       ->
+                "PUMP"     ->
                     if (!remoteCommandsAllowed && divided.size > 1) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size <= 3) processPUMP(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "PROFILE"    ->
+                "PROFILE"  ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processPROFILE(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "BASAL"      ->
+                "BASAL"    ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processBASAL(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "EXTENDED"   ->
+                "EXTENDED" ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processEXTENDED(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "BOLUS"      ->
+                "BOLUS"    ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (commandQueue.bolusInQueue()) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_another_bolus_in_queue)))
-                    else if (divided.size == 2 && dateUtil.now() - lastRemoteBolusTime < minDistance) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_bolus_not_allowed)))
+                    // Spacing guard applies to BOTH plain ("BOLUS x") and meal ("BOLUS x MEAL") forms;
+                    // the meal form (size 3) previously skipped it, allowing unbounded back-to-back stacking.
+                    else if ((divided.size == 2 || divided.size == 3) && dateUtil.now() - lastRemoteBolusTime < minDistance) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_bolus_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processBOLUS(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "CARBS"      ->
+                "CARBS"    ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2 || divided.size == 3) processCARBS(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "CAL"        ->
+                "CAL"      ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2) processCAL(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "TARGET"     ->
+                "TARGET"   ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2) processTARGET(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "SMS"        ->
+                "SMS"      ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 2) processSMS(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "HELP"       ->
+                "HELP"     ->
                     if (divided.size == 1 || divided.size == 2) processHELP(divided, receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                "RESTART"    ->
+                "RESTART"  ->
                     if (!remoteCommandsAllowed) sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.smscommunicator_remote_command_not_allowed)))
                     else if (divided.size == 1) processRestart(receivedSms)
                     else sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
 
-                else         ->
+                else       ->
                     if (messageToConfirm?.requester?.phoneNumber == receivedSms.phoneNumber) {
                         val execute = messageToConfirm
                         messageToConfirm = null
@@ -540,15 +549,6 @@ class SmsCommunicatorPlugin @Inject constructor(
 
             else              -> sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
         }
-    }
-
-    private fun processNSCLIENT(divided: Array<String>, receivedSms: Sms) {
-        if (divided[1].uppercase(Locale.getDefault()) == "RESTART") {
-            rxBus.send(EventNSClientRestart())
-            sendSMS(Sms(receivedSms.phoneNumber, "AAPSCLIENT RESTART SENT"))
-            receivedSms.processed = true
-        } else
-            sendSMS(Sms(receivedSms.phoneNumber, rh.gs(R.string.wrong_format)))
     }
 
     private fun processHELP(divided: Array<String>, receivedSms: Sms) {

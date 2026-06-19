@@ -226,6 +226,9 @@ fun MainScreen(
 
                 val activeSceneState by mainViewModel.activeSceneState.collectAsStateWithLifecycle()
                 val sceneExpired by mainViewModel.sceneExpired.collectAsStateWithLifecycle()
+                val masterReachable by mainViewModel.masterReachable.collectAsStateWithLifecycle()
+                // (Probe-while-offline is now global — see ComposeMainActivity. This screen still reads
+                // masterReachable for its own gating.)
                 Box(modifier = Modifier.fillMaxSize()) {
                     // Main content
                     OverviewScreen(
@@ -240,6 +243,7 @@ fun MainScreen(
                         tempTargetRecordId = uiState.tempTargetRecordId,
                         runningMode = uiState.runningMode,
                         runningModeText = uiState.runningModeText,
+                        runningModeRemaining = uiState.runningModeRemaining,
                         runningModeProgress = uiState.runningModeProgress,
                         runningModeRecordId = uiState.runningModeRecordId,
                         tbrState = uiState.tbrState,
@@ -253,6 +257,7 @@ fun MainScreen(
                         statusLightsDef = statusLightsDef,
                         onNavigate = onNavigate,
                         onTbrChipClick = mainViewModel::showTbrInfo,
+                        onIobChipClick = chipsViewModel::showIobInfo,
                         notifications = notifications,
                         onDismissNotification = onDismissNotification,
                         onNotificationActionClick = onNotificationActionClick,
@@ -262,6 +267,7 @@ fun MainScreen(
                         sceneExpired = sceneExpired,
                         onEndScene = { mainViewModel.requestSceneDeactivation() },
                         onDismissScene = { mainViewModel.dismissExpiredScene() },
+                        endSceneEnabled = masterReachable,
                         formatDuration = mainViewModel::formatDuration,
                         paddingValues = contentPadding,
                         fabBottomOffset = if (hasToolbar && showChrome) 56.dp else 0.dp,
@@ -334,6 +340,7 @@ fun MainScreen(
                             onSearchQueryChange = onSearchQueryChange,
                             onSearchClear = onSearchClear,
                             onSearchActiveChange = onSearchActiveChange,
+                            isSimpleMode = uiState.isSimpleMode,
                             // Guard against transient 0 heights during AnimatedVisibility exit:
                             // the resulting contentPadding invalidation can schedule a remeasure
                             // on a node that's losing its owner — crashes in dispatchDraw.
@@ -473,6 +480,7 @@ fun MainScreen(
             ThreeButtonDialog(
                 title = confirmation.title,
                 message = confirmation.message,
+                icon = confirmation.icon,
                 primaryLabel = confirmation.confirmLabel ?: stringResource(R.string.ok),
                 onPrimary = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
                 secondaryLabel = secondaryLabel,
@@ -483,6 +491,7 @@ fun MainScreen(
             OkCancelDialog(
                 title = confirmation.title,
                 message = confirmation.message,
+                icon = confirmation.icon,
                 onConfirm = { mainViewModel.executeConfirmableAction(confirmation.onConfirmAction) },
                 onDismiss = { mainViewModel.dismissActionConfirmation() }
             )

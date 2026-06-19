@@ -38,6 +38,7 @@ import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.interfaces.queue.CustomCommand
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.collectResilient
 import app.aaps.core.interfaces.rx.events.EventMobileToWear
 import app.aaps.core.interfaces.rx.events.EventProfileChangeRequested
 import app.aaps.core.interfaces.rx.weardata.EventData
@@ -75,9 +76,8 @@ import app.aaps.implementation.queue.commands.CommandTempBasalPercent
 import app.aaps.implementation.queue.commands.CommandUpdateTime
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.LinkedList
 import javax.inject.Inject
 import javax.inject.Provider
@@ -113,17 +113,32 @@ class CommandQueueImplementation @Inject constructor(
     internal var handler = Handler(HandlerThread(this::class.simpleName + "Handler").also { it.start() }.looper)
 
     private val queue = LinkedList<Command>()
+
+    // Serializes every check-then-enqueue sequence (bolus, TBR, extended bolus, cancel*) and
+    // cancelAllBoluses. The pre-suspend queue methods were @Synchronized; without this lock two
+    // concurrent bolus() calls can both pass isRunning()/removeAll() and enqueue two boluses.
+    // Critical sections must not contain suspension points.
+    private val enqueueLock = Any()
     override var waitingForDisconnect = false
 
     @Volatile var performing: Command? = null
 
+    // Upper bound for a single pump profile push. A normal connection failure resolves the command
+    // (and the awaited deferred) on its own; this only guards the pathological lost-callback case so a
+    // hung set can't block the sequential profile-change collector forever. Tune if pumps legitimately
+    // need longer.
+    private val PROFILE_SET_TIMEOUT_MS = 10 * 60 * 1000L
+
     init {
+        // collectResilient guarantees a single failed onProfileChanged() can never permanently wedge
+        // profile switching (an unguarded collector would be cancelled for the whole process lifetime,
+        // after which every later ProfileSwitch is silently dropped: no pump push, no
+        // EffectiveProfileSwitch, isProfileChangePending() stuck true). The hang vector is handled
+        // separately by the withTimeoutOrNull() inside onProfileChanged().
         merge(
             rxBus.toFlow(EventProfileChangeRequested::class.java),
             persistenceLayer.observeChanges(PS::class.java)
-        )
-            .onEach { onProfileChanged() }
-            .launchIn(appScope)
+        ).collectResilient(appScope, aapsLogger, LTag.PROFILE) { onProfileChanged() }
         /*
          * Clear old WorkManager jobs, because they survive restart
          */
@@ -133,6 +148,7 @@ class CommandQueueImplementation @Inject constructor(
     private suspend fun onProfileChanged() {
         if (config.AAPSCLIENT) return // Effective profileswitch should be synced over NS, do not create EffectiveProfileSwitch here
         aapsLogger.debug(LTag.PROFILE, "onProfileChanged")
+        // Exceptions are handled by collectResilient at the call site; here we only guard the hang vector.
         profileFunction.getRequestedProfile()?.let {
             // Skip if the active EPS was already triggered by this PS (e.g. NSClient updating PS with nsId
             // retriggers observeChanges(PS)). The previous onProfileChanged already pushed the profile to the pump.
@@ -141,7 +157,22 @@ class CommandQueueImplementation @Inject constructor(
                 aapsLogger.debug(LTag.PROFILE, "Skipping onProfileChanged: active EPS id=${active.id} already represents PS id=${it.id}")
                 return@let
             }
-            val result = setProfile(ProfileSealed.PS(it, activePlugin), it.ids.nightscoutId != null)
+            // Bound the pump round-trip. setProfile() awaits a CommandSetProfile callback; if that
+            // callback is ever lost the deferred never completes, and because the collector processes
+            // emissions sequentially that single hang would block every future ProfileSwitch. On
+            // timeout we treat it as a failed update so the collector stays alive.
+            val result = withTimeoutOrNull(PROFILE_SET_TIMEOUT_MS) {
+                setProfile(ProfileSealed.PS(it, activePlugin), it.ids.nightscoutId != null)
+            }
+            if (result == null) {
+                aapsLogger.error(LTag.PROFILE, "setProfile timed out after $PROFILE_SET_TIMEOUT_MS ms for PS id=${it.id}")
+                uiInteraction.runAlarm(
+                    rh.gs(app.aaps.core.ui.R.string.failed_update_basal_profile),
+                    rh.gs(app.aaps.core.ui.R.string.failed_update_basal_profile),
+                    app.aaps.core.ui.R.raw.boluserror
+                )
+                return@let
+            }
             if (!result.success) {
                 uiInteraction.runAlarm(result.comment, rh.gs(app.aaps.core.ui.R.string.failed_update_basal_profile), app.aaps.core.ui.R.raw.boluserror)
             } else {
@@ -263,7 +294,10 @@ class CommandQueueImplementation @Inject constructor(
         performing = null
         synchronized(queue) {
             for (i in queue.indices) {
-                queue[i].cancel(app.aaps.core.ui.R.string.connectiontimedout)
+                // Connection-timeout drop: the pump was never reached, so the command was not
+                // executed. Report failure (success = false) so a waiting bolus caller is not told
+                // a dose was delivered. (Supersession via removeAll keeps the default success = true.)
+                queue[i].cancel(app.aaps.core.ui.R.string.connectiontimedout, success = false)
             }
             queue.clear()
         }
@@ -357,38 +391,41 @@ class CommandQueueImplementation @Inject constructor(
         rejectedByRunningModeGate(PumpCommandGate.CommandKind.BOLUS)?.let { return it }
 
         val type = if (detailedBolusInfo.bolusType == BS.Type.SMB) CommandType.SMB_BOLUS else CommandType.BOLUS
-        if (type == CommandType.SMB_BOLUS) {
-            if (bolusInQueue()) {
-                aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting SMB since a bolus is queue/running")
-                return pumpEnactResultProvider.get().enacted(false).success(false)
-            }
-            val lastBolusTime = persistenceLayer.getNewestBolus()?.timestamp ?: 0L
-            if (detailedBolusInfo.lastKnownBolusTime < lastBolusTime) {
-                aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting bolus, another bolus was issued since request time")
-                return pumpEnactResultProvider.get().enacted(false).success(false)
-            }
-            removeAll(CommandType.SMB_BOLUS)
-        }
-        if (isRunning(type)) return executingNowError()
-        removeAll(type)
-        // apply constraints
-        detailedBolusInfo.insulin = constraintChecker.applyBolusConstraints(ConstraintObject(detailedBolusInfo.insulin, aapsLogger)).value()
-        bolusProgressData.start(detailedBolusInfo.insulin, isSMB = detailedBolusInfo.bolusType === BS.Type.SMB, isPriming = detailedBolusInfo.bolusType == BS.Type.PRIMING)
+        // Suspend DB read must stay outside enqueueLock; CommandSMBBolus.execute() re-checks freshness at execution time.
+        val lastBolusTime = if (type == CommandType.SMB_BOLUS) persistenceLayer.getNewestBolus()?.timestamp ?: 0L else 0L
         val deferred = CompletableDeferred<PumpEnactResult>()
         val cb = object : Callback() {
             override fun run() {
                 deferred.complete(result)
             }
         }
-        if (detailedBolusInfo.bolusType == BS.Type.SMB) {
-            add(CommandSMBBolus(aapsLogger, rh, dateUtil, activePlugin, persistenceLayer, preferences, bolusProgressData, pumpEnactResultProvider, detailedBolusInfo, cb))
-        } else {
-            add(CommandBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, bolusProgressData, detailedBolusInfo, cb, type))
-            if (type == CommandType.BOLUS) { // Notify Wear about upcoming bolus
-                rxBus.send(EventMobileToWear(EventData.BolusProgress(percent = 0, status = rh.gs(app.aaps.core.ui.R.string.goingtodeliver, detailedBolusInfo.insulin))))
+        synchronized(enqueueLock) {
+            if (type == CommandType.SMB_BOLUS) {
+                if (bolusInQueue()) {
+                    aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting SMB since a bolus is queue/running")
+                    return pumpEnactResultProvider.get().enacted(false).success(false)
+                }
+                if (detailedBolusInfo.lastKnownBolusTime < lastBolusTime) {
+                    aapsLogger.debug(LTag.PUMPQUEUE, "Rejecting bolus, another bolus was issued since request time")
+                    return pumpEnactResultProvider.get().enacted(false).success(false)
+                }
+                removeAll(CommandType.SMB_BOLUS)
             }
+            if (isRunning(type)) return executingNowError()
+            removeAll(type)
+            // apply constraints
+            detailedBolusInfo.insulin = constraintChecker.applyBolusConstraints(ConstraintObject(detailedBolusInfo.insulin, aapsLogger)).value()
+            bolusProgressData.start(detailedBolusInfo.insulin, isSMB = detailedBolusInfo.bolusType === BS.Type.SMB, isPriming = detailedBolusInfo.bolusType == BS.Type.PRIMING)
+            if (detailedBolusInfo.bolusType == BS.Type.SMB) {
+                add(CommandSMBBolus(aapsLogger, rh, dateUtil, activePlugin, persistenceLayer, preferences, bolusProgressData, pumpEnactResultProvider, detailedBolusInfo, cb))
+            } else {
+                add(CommandBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, bolusProgressData, detailedBolusInfo, cb, type))
+                if (type == CommandType.BOLUS) { // Notify Wear about upcoming bolus
+                    rxBus.send(EventMobileToWear(EventData.BolusProgress(percent = 0, status = rh.gs(app.aaps.core.ui.R.string.goingtodeliver, detailedBolusInfo.insulin))))
+                }
+            }
+            notifyAboutNewCommand()
         }
-        notifyAboutNewCommand()
         val result = deferred.await()
         // Persist carbs only when the bolus actually succeeded.
         if (hasCarbs && result.success) {
@@ -440,88 +477,99 @@ class CommandQueueImplementation @Inject constructor(
         return deferred.await()
     }
 
-    @Synchronized
     override fun cancelAllBoluses(id: Long?) {
-        if (isRunning(CommandType.BOLUS)) {
-            bolusProgressData.stopPressed()
-        } else {
-            bolusProgressData.clear()
+        synchronized(enqueueLock) {
+            if (isRunning(CommandType.BOLUS)) {
+                bolusProgressData.stopPressed()
+            } else {
+                bolusProgressData.clear()
+            }
+            removeAll(CommandType.BOLUS)
+            removeAll(CommandType.SMB_BOLUS)
         }
-        removeAll(CommandType.BOLUS)
-        removeAll(CommandType.SMB_BOLUS)
         Thread { activePlugin.activePump.stopBolusDelivering() }.start()
     }
 
     override suspend fun tempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
         val gateKind = if (absoluteRate == 0.0) PumpCommandGate.CommandKind.TEMP_BASAL_ZERO else PumpCommandGate.CommandKind.TEMP_BASAL_NONZERO
         rejectedByRunningModeGate(gateKind)?.let { return it }
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
-        removeAll(CommandType.TEMPBASAL)
-        val rateAfterConstraints = constraintChecker.applyBasalConstraints(ConstraintObject(absoluteRate, aapsLogger), profile).value()
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandTempBasalAbsolute(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
-            override fun run() {
-                deferred.complete(result)
-            }
-        }))
-        notifyAboutNewCommand()
+        synchronized(enqueueLock) {
+            if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
+            removeAll(CommandType.TEMPBASAL)
+            val rateAfterConstraints = constraintChecker.applyBasalConstraints(ConstraintObject(absoluteRate, aapsLogger), profile).value()
+            add(CommandTempBasalAbsolute(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
+                override fun run() {
+                    deferred.complete(result)
+                }
+            }))
+            notifyAboutNewCommand()
+        }
         return deferred.await()
     }
 
     override suspend fun tempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, profile: Profile, tbrType: PumpSync.TemporaryBasalType): PumpEnactResult {
         val gateKind = if (percent == 0) PumpCommandGate.CommandKind.TEMP_BASAL_ZERO else PumpCommandGate.CommandKind.TEMP_BASAL_NONZERO
         rejectedByRunningModeGate(gateKind)?.let { return it }
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
-        removeAll(CommandType.TEMPBASAL)
-        val percentAfterConstraints = constraintChecker.applyBasalPercentConstraints(ConstraintObject(percent, aapsLogger), profile).value()
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandTempBasalPercent(aapsLogger, rh, activePlugin, pumpEnactResultProvider, percentAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
-            override fun run() {
-                deferred.complete(result)
-            }
-        }))
-        notifyAboutNewCommand()
+        synchronized(enqueueLock) {
+            if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
+            removeAll(CommandType.TEMPBASAL)
+            val percentAfterConstraints = constraintChecker.applyBasalPercentConstraints(ConstraintObject(percent, aapsLogger), profile).value()
+            add(CommandTempBasalPercent(aapsLogger, rh, activePlugin, pumpEnactResultProvider, percentAfterConstraints, durationInMinutes, enforceNew, tbrType, object : Callback() {
+                override fun run() {
+                    deferred.complete(result)
+                }
+            }))
+            notifyAboutNewCommand()
+        }
         return deferred.await()
     }
 
     override suspend fun extendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
         rejectedByRunningModeGate(PumpCommandGate.CommandKind.EXTENDED_BOLUS)?.let { return it }
-        if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
-        val rateAfterConstraints = constraintChecker.applyExtendedBolusConstraints(ConstraintObject(insulin, aapsLogger)).value()
-        removeAll(CommandType.EXTENDEDBOLUS)
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, object : Callback() {
-            override fun run() {
-                deferred.complete(result)
-            }
-        }))
-        notifyAboutNewCommand()
+        synchronized(enqueueLock) {
+            if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
+            val rateAfterConstraints = constraintChecker.applyExtendedBolusConstraints(ConstraintObject(insulin, aapsLogger)).value()
+            removeAll(CommandType.EXTENDEDBOLUS)
+            add(CommandExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, rateAfterConstraints, durationInMinutes, object : Callback() {
+                override fun run() {
+                    deferred.complete(result)
+                }
+            }))
+            notifyAboutNewCommand()
+        }
         return deferred.await()
     }
 
     override suspend fun cancelTempBasal(enforceNew: Boolean, autoForced: Boolean): PumpEnactResult {
-        if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
-        removeAll(CommandType.TEMPBASAL)
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandCancelTempBasal(aapsLogger, rh, activePlugin, pumpSync, dateUtil, pumpEnactResultProvider, enforceNew, autoForced, object : Callback() {
-            override fun run() {
-                deferred.complete(result)
-            }
-        }))
-        notifyAboutNewCommand()
+        synchronized(enqueueLock) {
+            if (!enforceNew && isRunning(CommandType.TEMPBASAL)) return executingNowError()
+            removeAll(CommandType.TEMPBASAL)
+            add(CommandCancelTempBasal(aapsLogger, rh, activePlugin, pumpSync, dateUtil, pumpEnactResultProvider, enforceNew, autoForced, object : Callback() {
+                override fun run() {
+                    deferred.complete(result)
+                }
+            }))
+            notifyAboutNewCommand()
+        }
         return deferred.await()
     }
 
     override suspend fun cancelExtended(): PumpEnactResult {
-        if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
-        removeAll(CommandType.EXTENDEDBOLUS)
         val deferred = CompletableDeferred<PumpEnactResult>()
-        add(CommandCancelExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
-            override fun run() {
-                deferred.complete(result)
-            }
-        }))
-        notifyAboutNewCommand()
+        synchronized(enqueueLock) {
+            if (isRunning(CommandType.EXTENDEDBOLUS)) return executingNowError()
+            removeAll(CommandType.EXTENDEDBOLUS)
+            add(CommandCancelExtendedBolus(aapsLogger, rh, activePlugin, pumpEnactResultProvider, object : Callback() {
+                override fun run() {
+                    deferred.complete(result)
+                }
+            }))
+            notifyAboutNewCommand()
+        }
         return deferred.await()
     }
 
