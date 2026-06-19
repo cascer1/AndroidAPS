@@ -102,8 +102,6 @@ data class GlucoseValue(
         SYAI_TAG,
 
         INSTARA,
-
-        XDRIP,
         IOB_PREDICTION,
         A_COB_PREDICTION,
         COB_PREDICTION,

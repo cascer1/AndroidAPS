@@ -97,6 +97,6 @@ class NotificationReaderPlugin @Inject constructor(
 
         const val PERMISSION_NOTIFICATION_LISTENER = "app.aaps.permission.NOTIFICATION_LISTENER"
         private const val PACKAGE_CONFIG_ASSET = "notification_reader_packages.json"
-        private const val REMOTE_DEFINITIONS_URL = "https://vobar.eu/notification_reader_packages.json"
+        private const val REMOTE_DEFINITIONS_URL = "https://raw.githubusercontent.com/nightscout/AndroidAPS/refs/heads/versions/notification_reader_packages.json"
     }
 }
