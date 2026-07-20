@@ -45,7 +45,6 @@
     <string name="a11y_arrow_unknown">ismeretlen</string>
     <string name="a11y_high">magas</string>
     <string name="a11y_low">alacsony</string>
-    <string name="average">Átlag</string>
     <string name="profile">Profil</string>
     <string name="treatments_wizard_basaliob_label">Bázis IOB</string>
     <string name="overview_insulin_label">Inzulin</string>
@@ -55,19 +54,22 @@
     <string name="wrongpassword">Hibás jelszó</string>
     <string name="passwords_dont_match">Jelszavak nem egyeznek</string>
     <!--    Profile-->
-    <string name="profile_per_unit">/Е</string>
     <string name="profile_ins_units_per_hour">E/ó</string>
     <string name="profile_carbs_per_unit">g/E</string>
     <!--    ProfileFunction-->
     <!--    APSResult-->
     <string name="duration">Időtartam</string>
     <!--    Insulin / Concentration-->
+    <!--       Stats -->
+    <string name="average">Átlag</string>
     <!--    ProfileSwitch-->
     <!--    Temptarget-->
     <!--    Translator-->
     <string name="careportal">Careportal</string>
     <string name="careportal_announcement">Közlemény</string>
     <string name="careportal_question">Kérdés</string>
+    <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
+    <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="glucosetype_sensor">Szenzor</string>
     <string name="wear">Wear</string>
     <string name="automation">Automatizálás</string>
@@ -119,6 +121,7 @@
     <!-- datetime layout -->
     <!-- BluetoothDevicePreference -->
     <!--    Combo-->
+    <!--    Pump pair/unpair (shared) -->
     <!--    BlePreCheck-->
     <!--    Preferences -->
     <!-- Navigation -->

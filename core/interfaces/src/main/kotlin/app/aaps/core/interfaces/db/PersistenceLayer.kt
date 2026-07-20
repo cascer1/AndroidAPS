@@ -3,6 +3,7 @@ package app.aaps.core.interfaces.db
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.CA
+import app.aaps.core.data.model.CAL
 import app.aaps.core.data.model.DS
 import app.aaps.core.data.model.EB
 import app.aaps.core.data.model.EPS
@@ -29,6 +30,24 @@ import app.aaps.core.interfaces.aps.APSResult
 import kotlinx.coroutines.flow.Flow
 import kotlin.reflect.KClass
 
+/**
+ * Read-only diagnostics gathered before a startup VACUUM.
+ * @property dbSizeBytes size of the main DB file incl. `-wal`/`-shm` (0 if it could not be read)
+ * @property availableBytes free space on the DB's volume, or -1 if unknown
+ * @property totalRows sum of rows across all tables
+ * @property deletableRows rows older than the retention window (the cleanup backlog)
+ * @property changeRows tracked-change rows (`referenceId IS NOT NULL`) across all tables
+ * @property report human-readable per-table counts (total / older-than-retention / tracked-changes)
+ */
+data class DatabaseMaintenanceInfo(
+    val dbSizeBytes: Long,
+    val availableBytes: Long,
+    val totalRows: Long,
+    val deletableRows: Long,
+    val changeRows: Long,
+    val report: String
+)
+
 interface PersistenceLayer {
 
     /**
@@ -48,6 +67,20 @@ interface PersistenceLayer {
      */
     suspend fun cleanupDatabase(keepDays: Long, deleteTrackedChanges: Boolean): String
 
+    /**
+     * Full VACUUM of the database: defragments the file and returns free pages to the OS.
+     * Heavy and memory intensive — only call when nothing else is using the DB (e.g. on startup
+     * before plugins/loop/sync start). May throw if the DB is busy/locked.
+     */
+    suspend fun vacuumDatabase()
+
+    /**
+     * Collect DB size, free space and per-table row counts (total, older-than-retention, tracked
+     * changes) for logging before a startup VACUUM. Read-only and failure-tolerant.
+     * @param retentionDays the cleanup window, used to count the deletable backlog (rows older than it)
+     */
+    suspend fun databaseMaintenanceInfo(retentionDays: Long): DatabaseMaintenanceInfo
+
     // Flow-based change observation
     /**
      * Observe changes for a specific domain type
@@ -61,6 +94,12 @@ interface PersistenceLayer {
      * @return Flow that emits set of changed domain type KClasses (e.g. {BS::class, CA::class})
      */
     fun observeAnyChange(): Flow<Set<KClass<*>>>
+
+    /**
+     * Emits Unit once whenever all tables are wiped (clearDatabases).
+     * Observers that cache DB-derived state (e.g. status lights) should subscribe and refresh.
+     */
+    val databaseClearedFlow: Flow<Unit>
 
     // BS
     /**
@@ -150,11 +189,6 @@ interface PersistenceLayer {
      * @return List of inserted/updated records
      */
     suspend fun insertOrUpdateBolus(bolus: BS, action: Action, source: Sources, note: String? = null): TransactionResult<BS>
-
-    /**
-     * Update bolus record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateBolusNoLogging(bolus: BS)
 
     /**
      * Insert record
@@ -470,6 +504,31 @@ interface PersistenceLayer {
      */
     suspend fun updateGlucoseValuesNsIds(glucoseValues: List<GV>): TransactionResult<GV>
 
+    // CALIBRATION ENTRIES
+    /** Get highest id in database (sync pointer). */
+    suspend fun getLastCalibrationEntryId(): Long?
+
+    /** Get next changed record after id (sync). */
+    suspend fun getNextSyncElementCalibrationEntry(id: Long): Pair<CAL, CAL>?
+
+    /** Valid (non-invalidated) calibration entries since [from], used by the calibration fit. */
+    suspend fun getValidCalibrationEntriesSince(from: Long): List<CAL>
+
+    /** All valid calibration entries. */
+    suspend fun getAllValidCalibrationEntries(): List<CAL>
+
+    /** Insert or update a locally created calibration entry (master side). */
+    suspend fun insertOrUpdateCalibrationEntry(calibrationEntry: CAL): TransactionResult<CAL>
+
+    /** Apply calibration entries received from NS (follower side), deduped by nightscoutId. */
+    suspend fun syncNsCalibrationEntries(calibrationEntries: List<CAL>): TransactionResult<CAL>
+
+    /** Invalidate calibration entry with id. */
+    suspend fun invalidateCalibrationEntry(id: Long, action: Action, source: Sources, note: String?, listValues: List<ValueWithUnit>): TransactionResult<CAL>
+
+    /** Update NS id' of calibration entries in database. */
+    suspend fun updateCalibrationEntriesNsIds(calibrationEntries: List<CAL>): TransactionResult<CAL>
+
     // EPS
     /**
      * Get all effective profile switches from db
@@ -547,11 +606,6 @@ interface PersistenceLayer {
      * @param effectiveProfileSwitch record
      */
     suspend fun insertOrUpdateEffectiveProfileSwitch(effectiveProfileSwitch: EPS): TransactionResult<EPS>
-
-    /**
-     * Update effective profile switch record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateEffectiveProfileSwitchNoLogging(effectiveProfileSwitch: EPS)
 
     /**
      * Invalidate record with id
@@ -656,11 +710,6 @@ interface PersistenceLayer {
      * @return List of inserted/updated records
      */
     suspend fun insertOrUpdateProfileSwitch(profileSwitch: PS, action: Action, source: Sources, note: String? = null, listValues: List<ValueWithUnit>): TransactionResult<PS>
-
-    /**
-     * Update profile switch record without creating UserEntry. For data migrations only.
-     */
-    suspend fun updateProfileSwitchNoLogging(profileSwitch: PS)
 
     /**
      * Invalidate record with id
@@ -1350,12 +1399,14 @@ interface PersistenceLayer {
     suspend fun getHeartRatesFromTimeToTime(startTime: Long, endTime: Long): List<HR>
 
     /**
-     * Insert or update if exists record
+     * Insert or update multiple records in a single DB transaction. Emits one change event
+     * for the whole batch instead of one per row. Callers with a single row should pass
+     * `listOf(row)`.
      *
-     * @param heartRate record
+     * @param heartRates records
      * @return List of inserted/updated records
      */
-    suspend fun insertOrUpdateHeartRate(heartRate: HR): TransactionResult<HR>
+    suspend fun insertOrUpdateHeartRates(heartRates: List<HR>): TransactionResult<HR>
 
     // FD
     /**
@@ -1489,12 +1540,14 @@ interface PersistenceLayer {
     suspend fun getLastStepsCountFromTimeToTime(startTime: Long, endTime: Long): SC?
 
     /**
-     * Insert or update if exists record
+     * Insert or update multiple records in a single DB transaction. Emits one change event
+     * for the whole batch instead of one per row. Callers with a single row should pass
+     * `listOf(row)`.
      *
-     * @param stepsCount record
+     * @param stepsCounts records
      * @return List of inserted/updated records
      */
-    suspend fun insertOrUpdateStepsCount(stepsCount: SC): TransactionResult<SC>
+    suspend fun insertOrUpdateStepsCounts(stepsCounts: List<SC>): TransactionResult<SC>
 
     // VersionChange
 

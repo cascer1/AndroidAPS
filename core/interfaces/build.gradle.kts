@@ -2,10 +2,12 @@ import kotlin.math.min
 
 plugins {
     alias(libs.plugins.android.library)
+    alias(libs.plugins.compose.compiler)
     id("kotlin-parcelize")
     id("kotlinx-serialization")
     id("android-module-dependencies")
     id("test-module-dependencies")
+    id("compose-test-module-dependencies")
     id("jacoco-module-dependencies")
 }
 
@@ -14,6 +16,10 @@ android {
     namespace = "app.aaps.core.interfaces"
     defaultConfig {
         minSdk = min(Versions.minSdk, Versions.wearMinSdk)
+    }
+
+    buildFeatures {
+        compose = true
     }
 }
 

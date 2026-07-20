@@ -35,7 +35,7 @@ import com.patrykandpatrick.vico.compose.cartesian.axis.HorizontalAxis
 import com.patrykandpatrick.vico.compose.cartesian.axis.VerticalAxis
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProducer
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianLayerRangeProvider
-import com.patrykandpatrick.vico.compose.cartesian.data.lineSeries
+import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
 import com.patrykandpatrick.vico.compose.cartesian.decoration.HorizontalBox
 import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
@@ -68,7 +68,7 @@ private val PREDICTION_SERIES = listOf(SERIES_PRED_IOB, SERIES_PRED_COB, SERIES_
  * Layer 0 (start axis): BG readings — regular (outlined circles) + bucketed (filled, range-colored)
  * Layer 1 (end axis, hidden): Basal — profile (dashed step) + actual delivered (solid step + area fill)
  *
- * Basal Y-axis is scaled so maxBasal = 25% of chart height (maxY = maxBasal * 4).
+ * Basal Y-axis is scaled so maxBasal occupies [BASAL_HEIGHT_FRACTION] of the chart height (maxY = maxBasal / BASAL_HEIGHT_FRACTION).
  *
  * Scroll/Zoom:
  * - Accepts external scroll/zoom states for synchronization with secondary graphs
@@ -155,11 +155,13 @@ fun BgGraphCompose(
         val regularPoints = seriesRegistry[SERIES_REGULAR] ?: emptyList()
         val bucketedPoints = seriesRegistry[SERIES_BUCKETED] ?: emptyList()
 
-        if (regularPoints.isEmpty() && bucketedPoints.isEmpty()) return
+        // Note: do NOT early-return when there are no BG points. With a clean DB the chart must
+        // still build its frame (axes, now-line, in-range belt) via the normalizer + dummy layers,
+        // matching the COB graph. The per-layer logic below already handles empty series.
 
         modelProducer.runTransaction {
             // Block 1 → BG layer (layer 0, start axis)
-            lineSeries {
+            lineModel {
                 val activeSeries = mutableListOf<String>()
 
                 if (regularPoints.isNotEmpty()) {
@@ -181,7 +183,7 @@ fun BgGraphCompose(
                 // Prediction series - each type as a separate line
                 for (predSeries in PREDICTION_SERIES) {
                     val predPoints = seriesRegistry[predSeries]
-                    if (predPoints != null && predPoints.isNotEmpty()) {
+                    if (!predPoints.isNullOrEmpty()) {
                         val dataPoints = predPoints
                             .map { timestampToX(it.timestamp, minTimestamp) to it.value }
                             .sortedBy { it.first }
@@ -197,7 +199,7 @@ fun BgGraphCompose(
             }
 
             // Block 2 → Basal layer (layer 1, end axis)
-            lineSeries {
+            lineModel {
                 if (currentBasalData.profileBasal.size >= 2) {
                     val pts = currentBasalData.profileBasal
                         .map { timestampToX(it.timestamp, minTimestamp) to it.value }
@@ -220,7 +222,7 @@ fun BgGraphCompose(
             }
 
             // Block 3 → Target line layer (layer 2, start axis)
-            lineSeries {
+            lineModel {
                 if (currentTargetData.targets.size >= 2) {
                     val pts = currentTargetData.targets
                         .map { timestampToX(it.timestamp, minTimestamp) to it.value }
@@ -232,14 +234,13 @@ fun BgGraphCompose(
                 }
             }
 
-            // Block 4 → EPS layer (layer 3, end axis — Y-values normalized to basal coordinate space)
-            // EPS shares End axis with basal, so Y-values must fit within basalMaxY range.
-            // Place icons at 75% of chart height for 100% profile, scaled proportionally.
-            lineSeries {
+            // Block 4 → EPS layer (layer 3, start axis — Y based on profile %, scaled into BG coordinate space)
+            // Same principle as legacy (originalPercentage/100 * baseline); baseline = 75% of the BG axis height.
+            lineModel {
                 if (currentEpsPoints.isNotEmpty()) {
-                    val epsBaseline = currentBasalData.maxBasal * 4.0 * 0.75 // 75% of basalMaxY
+                    val epsBaseline = currentMaxBgY * 0.75
                     val pts = currentEpsPoints
-                        .map { timestampToX(it.timestamp, minTimestamp) to (it.originalPercentage / 100.0 * epsBaseline) }
+                        .map { eps -> timestampToX(eps.timestamp, minTimestamp) to (eps.originalPercentage / 100.0 * epsBaseline) }
                         .sortedBy { it.first }
                     series(x = pts.map { it.first }, y = pts.map { it.second })
                 } else {
@@ -250,13 +251,13 @@ fun BgGraphCompose(
 
             // Block 5 → Activity layer (layer 4, start axis — Y-values normalized to BG coordinate space)
             // Scale so maxActivity maps to 80% of maxBgY (same as legacy: maxY * 0.8 / maxIAValue)
-            lineSeries {
+            lineModel {
                 val maxAct = currentActivityData.maxActivity
                 if (!showActivity || maxAct <= 0.0 || currentActivityData.activity.size < 2) {
                     // Activity disabled or no data — emit dummy series (history + prediction)
                     series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
                     series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
-                    return@lineSeries
+                    return@lineModel
                 }
                 val scaleFactor = currentMaxBgY * 0.8 / maxAct
 
@@ -466,10 +467,9 @@ fun BgGraphCompose(
         listOf(activityHistLine, activityPredLine)
     }
 
-    // Basal Y-axis range: maxBasal * 4 so basal occupies ~25% of chart height
-    // EPS layer shares End axis with basal, so both must use the same Y-range (basalMaxY)
+    // Basal Y-axis range: maxBasal / BASAL_HEIGHT_FRACTION so basal occupies that fraction of chart height
     val basalMaxY = remember(basalData.maxBasal) {
-        if (basalData.maxBasal > 0.0) basalData.maxBasal * 4.0 else 1.0
+        if (basalData.maxBasal > 0.0) basalData.maxBasal / BASAL_HEIGHT_FRACTION else 1.0
     }
 
     // =========================================================================
@@ -527,11 +527,11 @@ fun BgGraphCompose(
                 rangeProvider = startAxisRangeProvider,
                 verticalAxisPosition = Axis.Position.Vertical.Start
             ),
-            // Layer 3: EPS (end axis — shares basalMaxY range, EPS Y-values normalized in rebuildChart)
+            // Layer 3: EPS (start axis — Y based on profile %, same range as BG layer)
             rememberLineCartesianLayer(
                 lineProvider = LineCartesianLayer.LineProvider.series(epsLines),
-                rangeProvider = endAxisRangeProvider,
-                verticalAxisPosition = Axis.Position.Vertical.End
+                rangeProvider = startAxisRangeProvider,
+                verticalAxisPosition = Axis.Position.Vertical.Start
             ),
             // Layer 4: Activity (start axis — shares BG Y-axis range, values normalized in rebuildChart)
             rememberLineCartesianLayer(
@@ -556,7 +556,7 @@ fun BgGraphCompose(
                 guideline = LineComponent(fill = Fill(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
             ),
             decorations = decorations,
-            getXStep = { 1.0 }
+            getXStep = { _, _, _ -> 1.0 }
         ),
         modelProducer = modelProducer,
         modifier = modifier.fillMaxWidth(),

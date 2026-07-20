@@ -32,9 +32,12 @@
     <!--    APSResult-->
     <string name="duration">Trajanje</string>
     <!--    Insulin / Concentration-->
+    <!--       Stats -->
     <!--    ProfileSwitch-->
     <!--    Temptarget-->
     <!--    Translator-->
+    <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
+    <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="glucosetype_sensor">Senzor</string>
     <string name="wear">Sat</string>
     <string name="loop">Loop</string>
@@ -69,6 +72,7 @@
     <!-- datetime layout -->
     <!-- BluetoothDevicePreference -->
     <!--    Combo-->
+    <!--    Pump pair/unpair (shared) -->
     <!--    BlePreCheck-->
     <!--    Preferences -->
     <!-- Navigation -->

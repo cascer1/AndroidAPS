@@ -1,10 +1,5 @@
 package app.aaps.ui.compose.configuration
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,69 +14,52 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.aaps.core.data.plugin.PluginType
+import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsTopAppBar
-import app.aaps.core.ui.compose.ConfigPluginItem
-import app.aaps.core.ui.compose.navigation.NavigationRequest
+import app.aaps.core.ui.compose.dialogs.OkCancelDialog
+import app.aaps.core.ui.compose.preference.SyncBadge
+import app.aaps.ui.plugin.HardwarePumpConfirmation
 
 @Composable
 fun ConfigurationScreen(
     categories: List<ConfigCategoryUiModel>,
     hardwarePumpConfirmation: HardwarePumpConfirmation?,
     onNavigateBack: () -> Unit,
-    onNavigate: (NavigationRequest) -> Unit,
-    onPluginEnableToggle: (pluginId: String, PluginType, Boolean) -> Unit,
+    onNavigateToCategory: (PluginType) -> Unit,
     onConfirmHardwarePump: () -> Unit,
     onDismissHardwarePump: () -> Unit,
 ) {
-    var expandedTypeOrdinal by rememberSaveable { mutableIntStateOf(-1) }
-
     if (hardwarePumpConfirmation != null) {
-        AlertDialog(
-            onDismissRequest = onDismissHardwarePump,
-            title = { Text(stringResource(app.aaps.core.ui.R.string.confirmation)) },
-            text = { Text(hardwarePumpConfirmation.message) },
-            confirmButton = {
-                TextButton(onClick = onConfirmHardwarePump) {
-                    Text(stringResource(android.R.string.ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismissHardwarePump) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            }
+        OkCancelDialog(
+            title = stringResource(R.string.confirmation),
+            message = hardwarePumpConfirmation.message,
+            onConfirm = onConfirmHardwarePump,
+            onDismiss = onDismissHardwarePump
         )
     }
 
     Scaffold(
         topBar = {
             AapsTopAppBar(
-                title = { Text(stringResource(app.aaps.core.ui.R.string.nav_configuration)) },
+                title = { Text(stringResource(R.string.nav_configuration)) },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(app.aaps.core.ui.R.string.back)
+                            contentDescription = stringResource(R.string.back)
                         )
                     }
                 }
@@ -94,49 +72,11 @@ fun ConfigurationScreen(
                 .padding(paddingValues)
         ) {
             categories.forEach { category ->
-                val isExpanded = expandedTypeOrdinal == category.type.ordinal
-
                 item(key = "cat_${category.type}") {
-                    val singlePlugin = category.plugins.singleOrNull()?.takeIf { it.isEnabled }
-
                     CategoryRow(
                         category = category,
-                        isExpanded = isExpanded,
-                        onRowClick = if (singlePlugin != null) {
-                            { onNavigate(NavigationRequest.Plugin(singlePlugin.id)) }
-                        } else {
-                            { expandedTypeOrdinal = if (isExpanded) -1 else category.type.ordinal }
-                        },
-                        onExpandClick = {
-                            expandedTypeOrdinal = if (isExpanded) -1 else category.type.ordinal
-                        }
+                        onClick = { onNavigateToCategory(category.type) }
                     )
-                }
-
-                item(key = "detail_${category.type}") {
-                    AnimatedVisibility(
-                        visible = isExpanded,
-                        enter = expandVertically(),
-                        exit = shrinkVertically()
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                                .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 8.dp)
-                        ) {
-                            category.plugins.forEach { plugin ->
-                                ConfigPluginItem(
-                                    plugin = plugin,
-                                    onPluginClick = { onNavigate(NavigationRequest.Plugin(plugin.id)) },
-                                    onEnableToggle = { enabled ->
-                                        onPluginEnableToggle(plugin.id, category.type, enabled)
-                                    },
-                                    onPreferencesClick = { onNavigate(NavigationRequest.PluginPreferences(plugin.id)) }
-                                )
-                            }
-                        }
-                    }
                 }
             }
         }
@@ -146,25 +86,17 @@ fun ConfigurationScreen(
 @Composable
 private fun CategoryRow(
     category: ConfigCategoryUiModel,
-    isExpanded: Boolean,
-    onRowClick: () -> Unit,
-    onExpandClick: () -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val categoryName = stringResource(category.titleRes)
-
     val iconPainter = rememberVectorPainter(category.categoryIcon ?: Icons.Default.Settings)
-
-    val chevronRotation = animateFloatAsState(
-        targetValue = if (isExpanded) 90f else 0f,
-        label = "chevron"
-    )
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onRowClick)
+            .clickable(onClick = onClick)
             .padding(start = 24.dp, top = 12.dp, bottom = 12.dp, end = 4.dp)
     ) {
         Icon(
@@ -190,16 +122,13 @@ private fun CategoryRow(
                 overflow = TextOverflow.Ellipsis
             )
         }
-        IconButton(onClick = onExpandClick) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = if (isExpanded) stringResource(app.aaps.core.ui.R.string.collapse)
-                else stringResource(app.aaps.core.ui.R.string.expand),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.graphicsLayer { rotationZ = chevronRotation.value }
-            )
-        }
+        // Synced (master-linked) category: the same PhonelinkRing badge used on synced preference rows.
+        SyncBadge(visible = category.synced, modifier = Modifier.padding(end = 8.dp))
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 12.dp)
+        )
     }
 }
-
-// ConfigPluginItem is now in core:ui - app.aaps.core.ui.compose.ConfigPluginItem

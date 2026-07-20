@@ -49,7 +49,6 @@ import app.aaps.plugins.aps.keys.ApsIntentKey
 import app.aaps.plugins.aps.openAPSSMB.GlucoseStatusCalculatorSMB
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.JsonObject
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -91,7 +90,7 @@ class OpenAPSAMAPlugin @Inject constructor(
         .pluginName(R.string.openapsama)
         .shortName(R.string.oaps_shortname)
         .preferencesVisibleInSimpleMode(false)
-        .showInList { config.APS }
+        .showInList { config.APS || config.AAPSCLIENT }   // AAPSCLIENT: visible so a client can select the master's APS
         .description(R.string.description_ama),
     ownPreferences = listOf(ApsIntentKey::class.java),
     aapsLogger, rh, preferences
@@ -310,10 +309,7 @@ class OpenAPSAMAPlugin @Inject constructor(
         return value
     }
 
-    // Needed only for dynamic ISF so far
-    override fun configuration(): JsonObject = JsonObject(emptyMap())
-    override fun applyConfiguration(configuration: JsonObject) {}
-
+    // ApsUseAutosens gates whether autosens runs and feeds the sensitivity ratio into COB.
     override fun getPreferenceScreenContent() = PreferenceSubScreenDef(
         key = "openapsma_settings",
         titleResId = R.string.openapsama,

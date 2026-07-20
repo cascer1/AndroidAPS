@@ -10,10 +10,10 @@ import androidx.core.app.ActivityCompat
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.rx.events.EventBTChange
 import app.aaps.core.interfaces.rx.events.EventShowSnackbar
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.utils.JsonHelper
-import app.aaps.plugins.automation.AutomationPlugin
+import app.aaps.plugins.automation.BtConnectionSource
 import app.aaps.plugins.automation.R
-import app.aaps.plugins.automation.compose.IconTint
 import app.aaps.plugins.automation.elements.ComparatorConnect
 import app.aaps.plugins.automation.elements.InputDropdownMenu
 import dagger.android.HasAndroidInjector
@@ -23,7 +23,7 @@ import javax.inject.Inject
 class TriggerBTDevice(injector: HasAndroidInjector) : Trigger(injector) {
 
     @Inject lateinit var context: Context
-    @Inject lateinit var automationPlugin: AutomationPlugin
+    @Inject lateinit var btConnectionSource: BtConnectionSource
 
     var btDevice = InputDropdownMenu(rh, "")
     var comparator: ComparatorConnect = ComparatorConnect(rh)
@@ -59,7 +59,7 @@ class TriggerBTDevice(injector: HasAndroidInjector) : Trigger(injector) {
         rh.gs(R.string.btdevicecompared, btDevice.value, rh.gs(comparator.value.stringRes))
 
     override fun composeIcon() = Icons.Filled.Bluetooth
-    override fun composeIconTint() = IconTint.Network
+    override fun elementType() = ElementType.AAPS
 
     override fun duplicate(): Trigger = TriggerBTDevice(injector, this)
 
@@ -75,7 +75,7 @@ class TriggerBTDevice(injector: HasAndroidInjector) : Trigger(injector) {
     }
 
     private fun eventExists(): Boolean {
-        ArrayList(automationPlugin.btConnects).forEach {
+        btConnectionSource.recentBtConnects().forEach {
             if (btDevice.value == it.deviceName) {
                 if (comparator.value == ComparatorConnect.Compare.ON_CONNECT && it.state == EventBTChange.Change.CONNECT) return true
                 if (comparator.value == ComparatorConnect.Compare.ON_DISCONNECT && it.state == EventBTChange.Change.DISCONNECT) return true

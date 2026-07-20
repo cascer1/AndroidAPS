@@ -36,7 +36,6 @@
     <string name="formatsignedinsulinunits">%1$+.2f U</string>
     <string name="format_carbs">%1$d g</string>
     <string name="format_hours">%1$.2f h</string>
-    <string name="format_mins">%1$d mins</string>
     <string name="objectives">Ciljevi</string>
     <string name="please_wait">Molimo pričekajte…</string>
     <string name="stop">Zaustavi</string>
@@ -78,7 +77,6 @@
     <string name="a11y_high">visoko</string>
     <string name="a11y_inrange">u rasponu</string>
     <string name="a11y_low">nisko</string>
-    <string name="average">Prosječno</string>
     <string name="activate_profile">Aktiviraj profil</string>
     <string name="profileswitch_ismissing">ProfileSwitch nedostaje. Promijenite profil ili pritisnite \"Aktiviraj profil\" u lokalnom profilu.</string>
     <string name="profile">Profil</string>
@@ -101,7 +99,6 @@
     <string name="basalprofilenotaligned">Bazalne vrijednosti nisu usklađene sa satima: %1$s</string>
     <string name="minimalbasalvaluereplaced">Bazalna vrijednost zamijenjena minimalnom podržanom vrijednošću: %1$s</string>
     <string name="maximumbasalvaluereplaced">Bazalna vrijednost zamijenjena maksimalnom podržanom vrijednošću: %1$s</string>
-    <string name="profile_per_unit">/U</string>
     <string name="profile_ins_units_per_hour">U/h</string>
     <string name="profile_carbs_per_unit">g/U</string>
     <!--    ProfileFunction-->
@@ -112,10 +109,14 @@
     <string name="duration">Trajanje</string>
     <string name="reason">Razlog</string>
     <!--    Insulin / Concentration-->
+    <!--       Stats -->
+    <string name="average">Prosječno</string>
     <!--    ProfileSwitch-->
     <!--    Temptarget-->
     <!--    Translator-->
     <string name="careportal_profileswitch">Zamjena profila</string>
+    <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
+    <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="glucosetype_sensor">Senzor</string>
     <string name="wear">Wear</string>
     <!--    Command-->
@@ -194,8 +195,6 @@
     <string name="bolus_advisor">Savjetnik za bolus</string>
     <string name="bolus_advisor_message">Imate visoku glikemiju. Umjesto da jedete sada, preporuča se pričekati bolju glikemiju. Želite li sada napraviti korekcijski bolus i podsjetiti vas kada je vrijeme za jelo? U ovom slučaju neće biti zabilježeni ugljikohidrati i morate ponovno koristiti čarobnjaka kada vas podsjetimo.</string>
     <string name="no_action_selected">Nije odabrana radnja, ništa se neće dogoditi</string>
-    <string name="wizard_explain_calc">Calc (IC: %1$.1f, ISF: %2$.1f)</string>
-    <string name="wizard_explain_iob">IOB: %1$.2fU</string>
     <!--    Preferences-->
     <!--    Protection-->
     <string name="unlock_settings">Otključaj postavke</string>
@@ -229,11 +228,11 @@
     <!-- Export destination chip labels -->
     <!-- Maintenance bottom sheet descriptions -->
     <!-- Cloud directory dialog (Compose) -->
-    <string name="format_hour_minute">%1$dh %2$dm</string>
     <!-- datetime layout -->
     <!-- BluetoothDevicePreference -->
     <string name="need_connect_permission">Aplikacija treba bluetooth dozvolu</string>
     <!--    Combo-->
+    <!--    Pump pair/unpair (shared) -->
     <!--    BlePreCheck-->
     <string name="ble_not_supported">Bluetooth Low Energy nije podržan.</string>
     <string name="ble_not_supported_or_not_paired">Bluetooth Low Energy nije podržan ili uređaj nije uparen.</string>

@@ -14,8 +14,8 @@ import app.aaps.core.data.pump.defs.ManufacturerType
 import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.data.pump.defs.PumpType
 import app.aaps.core.data.time.T
-import app.aaps.core.interfaces.constraints.Constraint
-import app.aaps.core.interfaces.constraints.PluginConstraints
+import app.aaps.core.interfaces.constraints.PumpPluginConstraints
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
@@ -120,8 +120,10 @@ import app.aaps.pump.insight.keys.InsightIntKey
 import app.aaps.pump.insight.keys.InsightLongNonKey
 import app.aaps.pump.insight.utils.ExceptionTranslator
 import app.aaps.pump.insight.utils.ParameterBlockUtil
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.util.Calendar
 import java.util.Date
@@ -130,7 +132,6 @@ import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
 import kotlin.math.abs
-import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 import android.app.NotificationManager as AndroidNotificationManager
@@ -151,6 +152,7 @@ class InsightPlugin @Inject constructor(
     private val notificationManager: NotificationManager,
     private val ch: ConcentrationHelper,
     private val bolusProgressData: BolusProgressData,
+    @ApplicationScope private val appScope: CoroutineScope,
     aapsSchedulers: AapsSchedulers,
     blePreCheck: BlePreCheck
 ) : PumpPluginBase(
@@ -171,7 +173,8 @@ class InsightPlugin @Inject constructor(
                 aapsSchedulers = aapsSchedulers,
                 pumpSync = pumpSync,
                 blePreCheck = blePreCheck,
-                ch = ch
+                ch = ch,
+                appScope = appScope
             )
         },
     ownPreferences = listOf(
@@ -179,7 +182,7 @@ class InsightPlugin @Inject constructor(
         InsightLongNonKey::class.java, InsightDoubleNonKey::class.java,
     ),
     aapsLogger, rh, preferences, commandQueue
-), Pump, Insight, PluginConstraints, InsightConnectionService.StateCallback, OwnDatabasePlugin {
+), Pump, Insight, PumpPluginConstraints, InsightConnectionService.StateCallback, OwnDatabasePlugin {
 
     override val pumpDescription: PumpDescription = PumpDescription().also { it.fillFor(PumpType.ACCU_CHEK_INSIGHT) }
     private val _bolusLock: Any = arrayOfNulls<Any>(0)
@@ -246,7 +249,7 @@ class InsightPlugin @Inject constructor(
     var tBROverNotificationBlock: TBROverNotificationBlock? = null
         private set
 
-    override fun onStart() {
+    override suspend fun onStart() {
         super.onStart()
         context.bindService(Intent(context, InsightConnectionService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
         context.bindService(Intent(context, InsightAlertService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
@@ -263,7 +266,7 @@ class InsightPlugin @Inject constructor(
         systemNotificationManager.createNotificationChannel(channel)
     }
 
-    override fun onStop() {
+    override suspend fun onStop() {
         super.onStop()
         context.unbindService(serviceConnection)
     }
@@ -309,7 +312,7 @@ class InsightPlugin @Inject constructor(
         if (alertService != null) connectionService?.withdrawConnectionRequest(this)
     }
 
-    override fun getPumpStatus(reason: String) {
+    override suspend fun getPumpStatus(reason: String) {
         connectionService?.let { service ->
             try {
                 tBROverNotificationBlock = ParameterBlockUtil.readParameterBlock(service, Service.CONFIGURATION, TBROverNotificationBlock::class.java)
@@ -441,9 +444,8 @@ class InsightPlugin @Inject constructor(
         }
     }
 
-    override fun setNewBasalProfile(profile: PumpProfile): PumpEnactResult {
+    override suspend fun setNewBasalProfile(profile: PumpProfile): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
-        notificationManager.dismiss(NotificationId.PROFILE_NOT_SET_NOT_INITIALIZED)
         val profileBlocks: MutableList<BasalProfileBlock> = ArrayList()
         for (i in profile.getBasalValues().indices) {
             val basalValue = profile.getBasalValues()[i]
@@ -463,8 +465,7 @@ class InsightPlugin @Inject constructor(
                 val profileBlock: BRProfileBlock = BRProfile1Block()
                 profileBlock.profileBlocks = profileBlocks
                 ParameterBlockUtil.writeConfigurationBlock(service, profileBlock)
-                notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
-                notificationManager.post(NotificationId.PROFILE_SET_OK, app.aaps.core.ui.R.string.profile_set_ok, validMinutes = 60)
+                // PROFILE_SET_OK posted (and FAILED cleared) centrally on the return value.
                 result.success(true)
                     .enacted(true)
                     .comment(app.aaps.core.ui.R.string.virtualpump_resultok)
@@ -475,17 +476,21 @@ class InsightPlugin @Inject constructor(
                 }
             } catch (e: AppLayerErrorException) {
                 aapsLogger.info(LTag.PUMP, "Exception while setting profile: " + e.javaClass.canonicalName + " (" + e.errorCode + ")")
-                notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.URGENT)
+                // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
                 result.comment(ExceptionTranslator.getString(context, e))
             } catch (e: InsightException) {
                 aapsLogger.info(LTag.PUMP, "Exception while setting profile: " + e.javaClass.canonicalName)
-                notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.URGENT)
+                // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
                 result.comment(ExceptionTranslator.getString(context, e))
             } catch (e: Exception) {
                 aapsLogger.error("Exception while setting profile", e)
-                notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile, level = NotificationLevel.URGENT)
+                // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
                 result.comment(ExceptionTranslator.getString(context, e))
             }
+        } ?: run {
+            // Not connected yet — deferred, not a genuine error; the profile is re-pushed on reconnect.
+            // success=true keeps it out of the central failure alarm; enacted=false => no PROFILE_SET_OK.
+            result.success(true).enacted(false)
         }
         return result
     }
@@ -525,7 +530,7 @@ class InsightPlugin @Inject constructor(
     private val _batteryLevel = MutableStateFlow<Int?>(null)
     override val batteryLevel: StateFlow<Int?> = _batteryLevel
 
-    override fun deliverTreatment(detailedBolusInfo: DetailedBolusInfo): PumpEnactResult {
+    override suspend fun deliverTreatment(detailedBolusInfo: DetailedBolusInfo): PumpEnactResult {
         if (detailedBolusInfo.insulin.equals(0.0) || detailedBolusInfo.carbs > 0) {
             throw IllegalArgumentException(detailedBolusInfo.toString(), Exception())
         }
@@ -544,10 +549,10 @@ class InsightPlugin @Inject constructor(
                         bolusID = service.requestMessage(bolusMessage).await().bolusId
                         bolusCancelled = false
                     }
-                    val isPriming = bolusProgressData.state.value?.isPriming ?: false
-                    val totalInsulin = bolusProgressData.state.value?.insulin ?: detailedBolusInfo.insulin
+                    bolusProgressData.state.value?.isPriming ?: false
+                    bolusProgressData.state.value?.insulin ?: detailedBolusInfo.insulin
                     result.success(true).enacted(true)
-                    bolusProgressData.updateProgress(0, ch.bolusProgressString(PumpInsulin(0.0), isPriming), 0.0)
+                    bolusProgressData.updateProgress(percent = 0)
                     var trials = 0
                     val now = dateUtil.now()
                     val serial = serialNumber()
@@ -563,16 +568,14 @@ class InsightPlugin @Inject constructor(
                     insightDbHelper.getInsightBolusID(serial, bolusID, now)?.also {
                         lastBolusType = detailedBolusInfo.bolusType
                         lastBolusTimestamp = it.timestamp
-                        runBlocking {
-                            pumpSync.syncBolusWithPumpId(
-                                it.timestamp,
-                                PumpInsulin(detailedBolusInfo.insulin),
-                                detailedBolusInfo.bolusType,
-                                it.id,
-                                PumpType.ACCU_CHEK_INSIGHT,
-                                serialNumber()
-                            )
-                        }
+                        pumpSync.syncBolusWithPumpId(
+                            it.timestamp,
+                            PumpInsulin(detailedBolusInfo.insulin),
+                            detailedBolusInfo.bolusType,
+                            it.id,
+                            PumpType.ACCU_CHEK_INSIGHT,
+                            serialNumber()
+                        )
                     }
                     while (!bolusCancelled) {
                         val operatingMode = service.requestMessage(GetOperatingModeMessage()).await().operatingMode
@@ -591,15 +594,13 @@ class InsightPlugin @Inject constructor(
                             trials = -1
                             val delivered = activeBolus.initialAmount - activeBolus.remainingAmount
                             val pumpInsulin = PumpInsulin(delivered)
-                            val percent = min((ch.fromPump(pumpInsulin, isPriming) / totalInsulin * 100).toInt(), 100)
-                            bolusProgressData.updateProgress(percent, ch.bolusProgressString(pumpInsulin, isPriming), delivered)
+                            bolusProgressData.updateProgress(delivered = pumpInsulin)
                         } else {
                             synchronized(_bolusLock) {
                                 if (bolusCancelled || trials == -1 || trials++ >= 5) {
                                     if (!bolusCancelled) {
                                         val pumpInsulin = PumpInsulin(insulin)
-                                        val percent = min((ch.fromPump(pumpInsulin, isPriming) / totalInsulin * 100).toInt(), 100)
-                                        bolusProgressData.updateProgress(percent, ch.bolusProgressString(pumpInsulin, isPriming), insulin)
+                                        bolusProgressData.updateProgress(delivered = pumpInsulin)
                                     }
                                 }
                             }
@@ -652,7 +653,7 @@ class InsightPlugin @Inject constructor(
         }.start()
     }
 
-    override fun setTempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
+    override suspend fun setTempBasalAbsolute(absoluteRate: Double, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
         if (activeBasalRate?.activeBasalRate == 0.0) return result
         activeBasalRate?.let { activeBasalRate ->
@@ -703,7 +704,7 @@ class InsightPlugin @Inject constructor(
         return result
     }
 
-    override fun setTempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
+    override suspend fun setTempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
         var percentage = (percent.toDouble() / 10.0).roundToInt() * 10
         if (percentage == 100) return cancelTempBasal(true) else if (percentage > 250) percentage = 250
@@ -740,7 +741,7 @@ class InsightPlugin @Inject constructor(
         return result
     }
 
-    override fun setExtendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
+    override suspend fun setExtendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
         var result = cancelExtendedBolusOnly()
         if (result.success) result = setExtendedBolusOnly(insulin, durationInMinutes, preferences.get(InsightBooleanKey.DisableVibration))
         try {
@@ -789,7 +790,7 @@ class InsightPlugin @Inject constructor(
         return result
     }
 
-    override fun cancelTempBasal(enforceNew: Boolean): PumpEnactResult {
+    override suspend fun cancelTempBasal(enforceNew: Boolean): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
         var cancelEBResult: PumpEnactResult? = null
         if (isFakingTempsByExtendedBoluses) cancelEBResult = cancelExtendedBolusOnly()
@@ -839,7 +840,7 @@ class InsightPlugin @Inject constructor(
         return result
     }
 
-    override fun cancelExtendedBolus(): PumpEnactResult {
+    override suspend fun cancelExtendedBolus(): PumpEnactResult {
         val result = cancelExtendedBolusOnly()
         try {
             fetchStatus()
@@ -1000,7 +1001,7 @@ class InsightPlugin @Inject constructor(
     override val isFakingTempsByExtendedBoluses: Boolean
         get() = preferences.get(InsightBooleanKey.EnableTbrEmulation)
 
-    override fun loadTDDs(): PumpEnactResult =
+    override suspend fun loadTDDs(): PumpEnactResult =
         pumpEnactResultProvider.get().success(true)
 
     private fun readHistory() {
@@ -1544,30 +1545,15 @@ class InsightPlugin @Inject constructor(
         }
     }
 
-    override fun applyBasalPercentConstraints(percentRate: Constraint<Int>, profile: Profile): Constraint<Int> {
-        percentRate.setIfGreater(0, rh.gs(app.aaps.core.ui.R.string.limitingpercentrate, 0, rh.gs(app.aaps.core.ui.R.string.itmustbepositivevalue)), this)
-        percentRate.setIfSmaller(
-            pumpDescription.maxTempPercent, rh.gs(app.aaps.core.ui.R.string.limitingpercentrate, pumpDescription.maxTempPercent, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this
-        )
-        return percentRate
-    }
-
-    override fun applyBolusConstraints(insulin: Constraint<Double>): Constraint<Double> {
+    // cU-domain pump limit (PumpPluginConstraints): folded into the IU scan by ConstraintsChecker.
+    // Below the pump's minimum deliverable amount the bolus is dropped to 0 (reasons logged, not surfaced).
+    override fun applyBolusConstraints(insulin: PumpInsulin): PumpInsulin {
         if (!limitsFetched) return insulin
-        insulin.setIfSmaller(maximumBolusAmount, rh.gs(app.aaps.core.ui.R.string.limitingbolus, maximumBolusAmount, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
-        if (insulin.value() < minimumBolusAmount) {
-
-            //TODO: Add function to Constraints or use different approach
-            // This only works if the interface of the InsightPlugin is called last.
-            // If not, another constraint could theoretically set the value between 0 and minimumBolusAmount
-            insulin.set(0.0, rh.gs(app.aaps.core.ui.R.string.limitingbolus, minimumBolusAmount, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
-        }
-        return insulin
+        val capped = insulin.cU.coerceAtMost(maximumBolusAmount)
+        return PumpInsulin(if (capped < minimumBolusAmount) 0.0 else capped)
     }
 
-    override fun applyExtendedBolusConstraints(insulin: Constraint<Double>): Constraint<Double> {
-        return applyBolusConstraints(insulin)
-    }
+    override fun applyExtendedBolusConstraints(insulin: PumpInsulin): PumpInsulin = applyBolusConstraints(insulin)
 
     override fun onStateChanged(state: InsightState?) {
         if (state == InsightState.CONNECTED) {
@@ -1591,11 +1577,11 @@ class InsightPlugin @Inject constructor(
     }
 
     override fun onPumpPaired() {
-        commandQueue.readStatus("Pump paired", null)
+        pluginScope.launch { commandQueue.readStatus("Pump paired") }
     }
 
     override fun onTimeoutDuringHandshake() {
-        notificationManager.post(NotificationId.INSIGHT_TIMEOUT_DURING_HANDSHAKE, R.string.timeout_during_handshake, level = NotificationLevel.URGENT)
+        notificationManager.post(NotificationId.INSIGHT_TIMEOUT_DURING_HANDSHAKE, R.string.timeout_during_handshake, level = NotificationLevel.IMPORTANT)
     }
 
     override fun canHandleDST(): Boolean {

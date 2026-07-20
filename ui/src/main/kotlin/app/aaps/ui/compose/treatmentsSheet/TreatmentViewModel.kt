@@ -9,6 +9,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
@@ -25,7 +26,6 @@ import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
 import app.aaps.core.objects.wizard.QuickWizardMode
 import app.aaps.core.ui.R
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.ui.compose.main.QuickWizardItem
 import app.aaps.ui.compose.navigation.ElementAvailability
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -76,6 +76,8 @@ class TreatmentViewModel @Inject constructor(
             preferences.observe(BooleanKey.OverviewShowCarbsButton).drop(1).map {},
             preferences.observe(BooleanKey.OverviewShowWizardButton).drop(1).map {},
             preferences.observe(BooleanKey.GeneralSimpleMode).drop(1).map {},
+            // QuickWizard entries changed (local edit or synced from the main phone).
+            quickWizard.changes.drop(1).map {},
         ).onEach { refreshState() }.launchIn(viewModelScope)
         rxBus.toFlow(EventRefreshOverview::class.java)
             .onEach { refreshState() }.launchIn(viewModelScope)
@@ -91,7 +93,7 @@ class TreatmentViewModel @Inject constructor(
             val showCgm = elementAvailability.isAvailable(ElementType.CGM_XDRIP) && preferences.get(BooleanKey.OverviewShowCgmButton)
             val showCalibration = elementAvailability.isAvailable(ElementType.CALIBRATION)
                 && iobCobCalculator.ads.actualBg() != null
-                && preferences.get(BooleanKey.OverviewShowCalibrationButton)
+                && (elementAvailability.isCalibrationOverrideActive() || preferences.get(BooleanKey.OverviewShowCalibrationButton))
             val showTreatment = preferences.get(BooleanKey.OverviewShowTreatmentButton)
             val showInsulin = preferences.get(BooleanKey.OverviewShowInsulinButton)
             val showCarbs = preferences.get(BooleanKey.OverviewShowCarbsButton)

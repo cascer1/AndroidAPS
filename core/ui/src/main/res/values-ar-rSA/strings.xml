@@ -7,9 +7,12 @@
     <!--    ProfileFunction-->
     <!--    APSResult-->
     <!--    Insulin / Concentration-->
+    <!--       Stats -->
     <!--    ProfileSwitch-->
     <!--    Temptarget-->
     <!--    Translator-->
+    <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
+    <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <!--    Command-->
     <!--    PumpEnactResult-->
     <!--    CarbsReq-->
@@ -37,6 +40,7 @@
     <!-- datetime layout -->
     <!-- BluetoothDevicePreference -->
     <!--    Combo-->
+    <!--    Pump pair/unpair (shared) -->
     <!--    BlePreCheck-->
     <!--    Preferences -->
     <!-- Navigation -->

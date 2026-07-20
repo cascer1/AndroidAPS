@@ -12,6 +12,7 @@ import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
+import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
 import app.aaps.core.interfaces.overview.LastBgData
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
@@ -22,6 +23,7 @@ import app.aaps.core.interfaces.utils.TrendCalculator
 import app.aaps.core.keys.BooleanComposedKey
 import app.aaps.core.keys.IntComposedKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.objects.extensions.apsAdjustedTargetMgdl
 import app.aaps.core.objects.extensions.displayText
 import app.aaps.core.objects.extensions.round
 import app.aaps.core.objects.profile.ProfileSealed
@@ -48,7 +50,8 @@ class WidgetStateLoader @Inject constructor(
     private val preferences: Preferences,
     private val constraintChecker: ConstraintsChecker,
     private val decimalFormatter: DecimalFormatter,
-    private val persistenceLayer: PersistenceLayer
+    private val persistenceLayer: PersistenceLayer,
+    private val processedDeviceStatusData: ProcessedDeviceStatusData
 ) {
 
     suspend fun loadState(appWidgetId: Int): WidgetRenderState {
@@ -72,7 +75,7 @@ class WidgetStateLoader @Inject constructor(
         val glucoseStatus = glucoseStatusProvider.glucoseStatusData
         val unavailable = rh.gs(app.aaps.core.ui.R.string.value_unavailable_short)
         val deltaText = glucoseStatus?.let { profileUtil.fromMgdlToSignedStringInUnits(it.delta) } ?: unavailable
-        val timeAgoText = dateUtil.minOrSecAgo(rh, lastBg?.timestamp)
+        val timeAgoText = dateUtil.minAgo(rh, lastBg?.timestamp)
 
         val bolusIob = iobCobCalculator.calculateIobFromBolus().round()
         val basalIob = iobCobCalculator.calculateIobFromTempBasalsIncludingConvertedExtended().round()
@@ -113,9 +116,9 @@ class WidgetStateLoader @Inject constructor(
             tempTargetActive = true
         } else {
             profileFunction.getProfile()?.let { profile ->
-                val targetUsed = loop.lastRun?.constraintsProcessed?.targetBG ?: 0.0
-                if (targetUsed != 0.0 && abs(profile.getTargetMgdl() - targetUsed) > 0.01) {
-                    tempTargetText = profileUtil.toTargetRangeString(targetUsed, targetUsed, GlucoseUnit.MGDL, units)
+                val adjustedTarget = profile.apsAdjustedTargetMgdl(loop, config, processedDeviceStatusData)
+                if (adjustedTarget != null) {
+                    tempTargetText = profileUtil.toTargetRangeString(adjustedTarget, adjustedTarget, GlucoseUnit.MGDL, units)
                     tempTargetColor = DarkGeneralColors.adjusted.toArgb()
                     tempTargetActive = true
                 } else {

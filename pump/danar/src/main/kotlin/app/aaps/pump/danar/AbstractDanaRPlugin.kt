@@ -4,9 +4,7 @@ import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.pump.defs.ManufacturerType
 import app.aaps.core.data.pump.defs.PumpDescription
 import app.aaps.core.interfaces.configuration.Config
-import app.aaps.core.interfaces.constraints.Constraint
-import app.aaps.core.interfaces.constraints.ConstraintsChecker
-import app.aaps.core.interfaces.constraints.PluginConstraints
+import app.aaps.core.interfaces.constraints.PumpPluginConstraints
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationId
@@ -15,7 +13,6 @@ import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.OwnDatabasePlugin
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginDescription
-import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.pump.Dana
 import app.aaps.core.interfaces.pump.Pump
 import app.aaps.core.interfaces.pump.PumpEnactResult
@@ -35,7 +32,6 @@ import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.Round.roundTo
 import app.aaps.core.keys.interfaces.Preferences
-import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.ui.compose.icons.IcPluginDanaI
 import app.aaps.pump.dana.DanaPump
 import app.aaps.pump.dana.comm.RecordTypes
@@ -57,7 +53,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.runBlocking
 import javax.inject.Provider
 import kotlin.math.abs
 import kotlin.math.max
@@ -72,7 +67,6 @@ abstract class AbstractDanaRPlugin protected constructor(
     preferences: Preferences,
     protected val config: Config,
     commandQueue: CommandQueue,
-    protected var constraintChecker: ConstraintsChecker,
     protected var aapsSchedulers: AapsSchedulers,
     protected var rxBus: RxBus,
     protected var activePlugin: ActivePlugin,
@@ -97,7 +91,7 @@ abstract class AbstractDanaRPlugin protected constructor(
         .description(app.aaps.pump.dana.R.string.description_pump_dana_r),
     ownPreferences = listOf(DanaStringNonKey::class.java, DanaIntKey::class.java, DanaIntNonKey::class.java, DanaBooleanKey::class.java, DanaIntentKey::class.java),
     aapsLogger, rh, preferences, commandQueue
-), Pump, Dana, PluginConstraints, OwnDatabasePlugin {
+), Pump, Dana, PumpPluginConstraints, OwnDatabasePlugin {
 
     protected var executionService: AbstractDanaRExecutionService? = null
     protected var disposable = CompositeDisposable()
@@ -105,7 +99,7 @@ abstract class AbstractDanaRPlugin protected constructor(
     override var pumpDescription = PumpDescription()
         protected set
 
-    override fun onStart() {
+    override suspend fun onStart() {
         super.onStart()
         disposable += rxBus
             .toObservable(EventConfigBuilderChange::class.java)
@@ -117,12 +111,12 @@ abstract class AbstractDanaRPlugin protected constructor(
         preferences.observe(DanaStringNonKey.RName).drop(1).onEach {
             danaPump.reset()
             pumpSync.connectNewPump(true)
-            commandQueue.readStatus(rh.gs(app.aaps.core.ui.R.string.device_changed), null)
+            commandQueue.readStatus(rh.gs(app.aaps.core.ui.R.string.device_changed))
         }.launchIn(newScope)
         danaPump.serialNumber = preferences.get(DanaStringNonKey.RName) // fill at start to allow password reset
     }
 
-    override fun onStop() {
+    override suspend fun onStop() {
         super.onStop()
         scope?.cancel()
         scope = null
@@ -136,28 +130,29 @@ abstract class AbstractDanaRPlugin protected constructor(
     override fun isBusy(): Boolean = false
 
     // Pump interface
-    override fun setNewBasalProfile(profile: PumpProfile): PumpEnactResult {
+    override suspend fun setNewBasalProfile(profile: PumpProfile): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
         if (executionService == null) {
             aapsLogger.error("setNewBasalProfile sExecutionService is null")
-            result.comment("setNewBasalProfile sExecutionService is null")
+            // Service not bound yet — deferred, not a genuine error; re-pushed on reconnect. success=true keeps
+            // it out of the central failure alarm; enacted stays false so no PROFILE_SET_OK is posted.
+            result.success(true).comment("setNewBasalProfile sExecutionService is null")
             return result
         }
         if (!isInitialized()) {
             aapsLogger.error("setNewBasalProfile not initialized")
-            notificationManager.post(NotificationId.PROFILE_NOT_SET_NOT_INITIALIZED, app.aaps.core.ui.R.string.pump_not_initialized_profile_not_set)
-            result.comment(app.aaps.core.ui.R.string.pump_not_initialized_profile_not_set)
+            // Not initialized yet — deferred, not a genuine error; re-pushed on reconnect. success=true keeps it
+            // out of the central failure alarm; enacted stays false so nothing is shown. Profile-set notifications
+            // (OK / clear-failed) are owned centrally by CommandQueueImplementation.onProfileChanged.
+            result.success(true).comment(app.aaps.core.ui.R.string.pump_not_initialized_profile_not_set)
             return result
-        } else {
-            notificationManager.dismiss(NotificationId.PROFILE_NOT_SET_NOT_INITIALIZED)
         }
+        // updateBasalsInPump now returns false on a genuine pump rejection (see the DanaR*ExecutionService
+        // return !msgSet.failed change), so success reflects the actual write outcome.
         if (executionService?.updateBasalsInPump(profile) != true) {
-            notificationManager.post(NotificationId.FAILED_UPDATE_PROFILE, app.aaps.core.ui.R.string.failed_update_basal_profile)
+            // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
             result.comment(app.aaps.core.ui.R.string.failed_update_basal_profile)
         } else {
-            notificationManager.dismiss(NotificationId.PROFILE_NOT_SET_NOT_INITIALIZED)
-            notificationManager.dismiss(NotificationId.FAILED_UPDATE_PROFILE)
-            notificationManager.post(NotificationId.PROFILE_SET_OK, app.aaps.core.ui.R.string.profile_set_ok, validMinutes = 60)
             result.success(true).enacted(true).comment("OK")
         }
         return result
@@ -195,7 +190,7 @@ abstract class AbstractDanaRPlugin protected constructor(
         executionService?.bolusStop()
     }
 
-    override fun setTempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
+    override suspend fun setTempBasalPercent(percent: Int, durationInMinutes: Int, enforceNew: Boolean, tbrType: TemporaryBasalType): PumpEnactResult {
         var percentReq = percent
         val result = pumpEnactResultProvider.get()
         if (percentReq < 0) {
@@ -224,18 +219,16 @@ abstract class AbstractDanaRPlugin protected constructor(
                 .percent(danaPump.tempBasalPercent)
                 .isPercent(true)
             aapsLogger.debug(LTag.PUMP, "setTempBasalPercent: OK")
-            runBlocking {
-                pumpSync.syncTemporaryBasalWithPumpId(
-                    danaPump.tempBasalStart,
-                    PumpRate(danaPump.tempBasalPercent.toDouble()),
-                    danaPump.tempBasalDuration,
-                    false,
-                    tbrType,
-                    danaPump.tempBasalStart,
-                    pumpDescription.pumpType,
-                    serialNumber()
-                )
-            }
+            pumpSync.syncTemporaryBasalWithPumpId(
+                danaPump.tempBasalStart,
+                PumpRate(danaPump.tempBasalPercent.toDouble()),
+                danaPump.tempBasalDuration,
+                false,
+                tbrType,
+                danaPump.tempBasalStart,
+                pumpDescription.pumpType,
+                serialNumber()
+            )
             return result
         }
         result.enacted(false).success(false).comment(app.aaps.core.ui.R.string.temp_basal_delivery_error)
@@ -243,12 +236,11 @@ abstract class AbstractDanaRPlugin protected constructor(
         return result
     }
 
-    override fun setExtendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
-        var insulinReq = insulin
-        insulinReq = constraintChecker.applyExtendedBolusConstraints(ConstraintObject(insulinReq, aapsLogger)).value()
-        // needs to be rounded
+    override suspend fun setExtendedBolus(insulin: Double, durationInMinutes: Int): PumpEnactResult {
+        // Already constrained in IU (queue) and in cU (PumpWithConcentration boundary); no re-apply here.
         val durationInHalfHours = max(durationInMinutes / 30, 1)
-        insulinReq = roundTo(insulinReq, pumpDescription.extendedBolusStep)
+        // round to the pump's native extended-bolus step (cU)
+        var insulinReq = roundTo(insulin, pumpDescription.extendedBolusStep)
         val result = pumpEnactResultProvider.get()
         if (danaPump.isExtendedInProgress && abs(danaPump.extendedBolusAmount - insulinReq) < pumpDescription.extendedBolusStep) {
             result.enacted(false)
@@ -279,17 +271,15 @@ abstract class AbstractDanaRPlugin protected constructor(
                 .absolute(danaPump.extendedBolusAbsoluteRate)
                 .isPercent(false)
             if (!preferences.get(DanaBooleanKey.UseExtended)) result.bolusDelivered(danaPump.extendedBolusAmount)
-            runBlocking {
-                pumpSync.syncExtendedBolusWithPumpId(
-                    danaPump.extendedBolusStart,
-                    PumpRate(danaPump.extendedBolusAmount),
-                    danaPump.extendedBolusDuration,
-                    preferences.get(DanaBooleanKey.UseExtended),
-                    danaPump.extendedBolusStart,
-                    pumpDescription.pumpType,
-                    serialNumber()
-                )
-            }
+            pumpSync.syncExtendedBolusWithPumpId(
+                danaPump.extendedBolusStart,
+                PumpRate(danaPump.extendedBolusAmount),
+                danaPump.extendedBolusDuration,
+                preferences.get(DanaBooleanKey.UseExtended),
+                danaPump.extendedBolusStart,
+                pumpDescription.pumpType,
+                serialNumber()
+            )
             aapsLogger.debug(LTag.PUMP, "setExtendedBolus: OK")
             return result
         }
@@ -299,20 +289,18 @@ abstract class AbstractDanaRPlugin protected constructor(
         return result
     }
 
-    override fun cancelExtendedBolus(): PumpEnactResult {
+    override suspend fun cancelExtendedBolus(): PumpEnactResult {
         val result = pumpEnactResultProvider.get()
         if (danaPump.isExtendedInProgress) {
             executionService?.extendedBolusStop()
             if (!danaPump.isExtendedInProgress) {
                 result.success(true).enacted(true).isTempCancel(true)
-                runBlocking {
-                    pumpSync.syncStopExtendedBolusWithPumpId(
-                        dateUtil.now(),
-                        dateUtil.now(),
-                        pumpDescription.pumpType,
-                        serialNumber()
-                    )
-                }
+                pumpSync.syncStopExtendedBolusWithPumpId(
+                    dateUtil.now(),
+                    dateUtil.now(),
+                    pumpDescription.pumpType,
+                    serialNumber()
+                )
             } else result.success(false).enacted(false).isTempCancel(true).comment(app.aaps.core.ui.R.string.canceling_eb_failed)
         } else {
             result.success(true).comment(app.aaps.core.ui.R.string.ok).isTempCancel(true)
@@ -344,7 +332,7 @@ abstract class AbstractDanaRPlugin protected constructor(
         executionService?.stopConnecting()
     }
 
-    override fun getPumpStatus(reason: String) {
+    override suspend fun getPumpStatus(reason: String) {
         executionService?.getPumpStatus()
         pumpDescription.basalStep = danaPump.basalStep
         pumpDescription.bolusStep = danaPump.bolusStep
@@ -362,27 +350,17 @@ abstract class AbstractDanaRPlugin protected constructor(
     /**
      * Constraint interface
      */
-    override fun applyBasalConstraints(absoluteRate: Constraint<Double>, profile: Profile): Constraint<Double> {
-        absoluteRate.setIfSmaller(danaPump.maxBasal, rh.gs(app.aaps.core.ui.R.string.limitingbasalratio, danaPump.maxBasal, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
-        return absoluteRate
-    }
+    // cU-domain pump limit (PumpPluginConstraints): folded into the IU scan by ConstraintsChecker.
+    override fun applyBasalConstraints(absoluteRate: PumpRate): PumpRate =
+        PumpRate(absoluteRate.cU.coerceAtMost(danaPump.maxBasal))
 
-    override fun applyBasalPercentConstraints(percentRate: Constraint<Int>, profile: Profile): Constraint<Int> {
-        percentRate.setIfGreater(0, rh.gs(app.aaps.core.ui.R.string.limitingpercentrate, 0, rh.gs(app.aaps.core.ui.R.string.itmustbepositivevalue)), this)
-        percentRate.setIfSmaller(pumpDescription.maxTempPercent, rh.gs(app.aaps.core.ui.R.string.limitingpercentrate, pumpDescription.maxTempPercent, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
-        return percentRate
-    }
+    // cU-domain pump limit (PumpPluginConstraints): folded into the IU scan by ConstraintsChecker.
+    override fun applyBolusConstraints(insulin: PumpInsulin): PumpInsulin =
+        PumpInsulin(insulin.cU.coerceAtMost(danaPump.maxBolus))
 
-    override fun applyBolusConstraints(insulin: Constraint<Double>): Constraint<Double> {
-        insulin.setIfSmaller(danaPump.maxBolus, rh.gs(app.aaps.core.ui.R.string.limitingbolus, danaPump.maxBolus, rh.gs(app.aaps.core.ui.R.string.pumplimit)), this)
-        return insulin
-    }
+    override fun applyExtendedBolusConstraints(insulin: PumpInsulin): PumpInsulin = applyBolusConstraints(insulin)
 
-    override fun applyExtendedBolusConstraints(insulin: Constraint<Double>): Constraint<Double> {
-        return applyBolusConstraints(insulin)
-    }
-
-    override fun loadTDDs(): PumpEnactResult {
+    override suspend fun loadTDDs(): PumpEnactResult {
         return loadHistory(RecordTypes.RECORD_TYPE_DAILY)
     }
 

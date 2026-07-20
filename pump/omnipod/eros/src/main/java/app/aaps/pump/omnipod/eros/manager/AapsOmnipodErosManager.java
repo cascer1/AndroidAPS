@@ -322,12 +322,10 @@ public class AapsOmnipodErosManager {
         return pumpEnactResultProvider.get().success(true).enacted(true);
     }
 
-    @NonNull public PumpEnactResult setBasalProfile(@Nullable Profile profile, boolean showNotifications) {
+    @NonNull public PumpEnactResult setBasalProfile(@Nullable Profile profile) {
         if (profile == null) {
+            // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
             String note = getStringResource(app.aaps.pump.omnipod.common.R.string.omnipod_common_error_failed_to_set_profile_empty_profile);
-            if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, note, NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
-            }
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(note);
         }
 
@@ -347,29 +345,17 @@ public class AapsOmnipodErosManager {
             executeCommand(() -> delegate.setBasalSchedule(basalSchedule, isBasalBeepsEnabled()));
         } catch (CommandFailedAfterChangingDeliveryStatusException ex) {
             createSuspendedFakeTbrIfNotExists();
-            if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, getStringResource(R.string.omnipod_eros_error_set_basal_failed_delivery_suspended), NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
-            }
+            // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
             String errorMessage = translateException(ex.getCause());
             addFailureToHistory(historyEntryType, errorMessage);
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(errorMessage);
         } catch (PrecedingCommandFailedUncertainlyException ex) {
-            if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, getStringResource(R.string.omnipod_eros_error_set_basal_failed_delivery_might_be_suspended), NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
-            }
+            // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
             String errorMessage = translateException(ex.getCause());
             addFailureToHistory(historyEntryType, errorMessage);
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(errorMessage);
         } catch (Exception ex) {
-            if (showNotifications) {
-                String note;
-                if (OmnipodManager.isCertainFailure(ex)) {
-                    note = getStringResource(app.aaps.pump.omnipod.common.R.string.omnipod_common_error_set_basal_failed);
-                } else {
-                    note = getStringResource(R.string.omnipod_eros_error_set_basal_might_have_failed_delivery_might_be_suspended);
-                }
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, note, NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
-            }
+            // FAILED_UPDATE_PROFILE posted centrally (onProfileChanged) from success=false; comment carries the reason.
             String errorMessage = translateException(ex);
             addFailureToHistory(historyEntryType, errorMessage);
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(errorMessage);
@@ -382,11 +368,7 @@ public class AapsOmnipodErosManager {
 
         addSuccessToHistory(historyEntryType, profile.getBasalValues());
 
-        if (showNotifications) {
-            showNotification(NotificationId.PROFILE_SET_OK, rh.gs(app.aaps.core.ui.R.string.profile_set_ok), NotificationLevel.INFO, null);
-        }
-
-        dismissNotification(NotificationId.FAILED_UPDATE_PROFILE);
+        // PROFILE_SET_OK posted (and FAILED_UPDATE_PROFILE cleared) centrally on the return value (onProfileChanged).
         dismissNotification(NotificationId.OMNIPOD_POD_SUSPENDED);
         dismissNotification(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC);
 
@@ -417,9 +399,7 @@ public class AapsOmnipodErosManager {
             bolusCommandResult = executeCommand(() -> delegate.bolus(PumpTypeExtensionKt.determineCorrectBolusSize(PumpType.OMNIPOD_EROS, detailedBolusInfo.insulin), beepsEnabled, beepsEnabled,
                     detailedBolusInfo.getBolusType() == BS.Type.SMB ? null :
                             (estimatedUnitsDelivered, percentage) -> {
-                                String status = ch.bolusProgressString(new PumpInsulin(estimatedUnitsDelivered), false);
-                                int percent = Math.min(percentage, 100);
-                                bolusProgressData.updateProgress(percent, status, estimatedUnitsDelivered);
+                                bolusProgressData.updateProgress(new PumpInsulin(estimatedUnitsDelivered));
                             }));
 
             bolusStarted = new Date();
@@ -432,7 +412,7 @@ public class AapsOmnipodErosManager {
         if (OmnipodManager.CommandDeliveryStatus.UNCERTAIN_FAILURE.equals(bolusCommandResult.getCommandDeliveryStatus())) {
             // For safety reasons, we treat this as a bolus that has successfully been delivered, in order to prevent insulin overdose
             if (detailedBolusInfo.getBolusType() == BS.Type.SMB) {
-                showNotification(NotificationId.OMNIPOD_UNCERTAIN_SMB, getStringResource(R.string.omnipod_eros_error_bolus_failed_uncertain_smb, detailedBolusInfo.insulin), NotificationLevel.URGENT, isNotificationUncertainSmbSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
+                showNotification(NotificationId.OMNIPOD_UNCERTAIN_SMB, getStringResource(R.string.omnipod_eros_error_bolus_failed_uncertain_smb, detailedBolusInfo.insulin), NotificationLevel.IMPORTANT, isNotificationUncertainSmbSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
             } else {
                 showErrorDialog(getStringResource(R.string.omnipod_eros_error_bolus_failed_uncertain), isNotificationUncertainBolusSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : 0);
             }
@@ -536,7 +516,7 @@ public class AapsOmnipodErosManager {
             String errorMessage = translateException(ex.getCause());
             addFailureToHistory(PodHistoryEntryType.SET_TEMPORARY_BASAL, errorMessage);
 
-            showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_set_temp_basal_failed_old_tbr_might_be_cancelled), NotificationLevel.URGENT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
+            showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_set_temp_basal_failed_old_tbr_might_be_cancelled), NotificationLevel.IMPORTANT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
 
             splitActiveTbr(); // Split any active TBR so when we recover from the uncertain TBR status,we only cancel the part after the cancellation
 
@@ -546,7 +526,7 @@ public class AapsOmnipodErosManager {
             long pumpId = addFailureToHistory(PodHistoryEntryType.SET_TEMPORARY_BASAL, errorMessage);
 
             if (!OmnipodManager.isCertainFailure(ex)) {
-                showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_set_temp_basal_failed_old_tbr_cancelled_new_might_have_failed), NotificationLevel.URGENT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
+                showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_set_temp_basal_failed_old_tbr_cancelled_new_might_have_failed), NotificationLevel.IMPORTANT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
 
                 // Assume that setting the temp basal succeeded here, because in case it didn't succeed,
                 // The next StatusResponse that we receive will allow us to recover from the wrong state
@@ -578,7 +558,7 @@ public class AapsOmnipodErosManager {
             executeCommand(() -> delegate.cancelTemporaryBasal(isTbrBeepsEnabled()));
         } catch (Exception ex) {
             if (OmnipodManager.isCertainFailure(ex)) {
-                showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_cancel_temp_basal_failed_uncertain), NotificationLevel.URGENT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
+                showNotification(NotificationId.OMNIPOD_TBR_ALERTS, getStringResource(R.string.omnipod_eros_error_cancel_temp_basal_failed_uncertain), NotificationLevel.IMPORTANT, isNotificationUncertainTbrSoundEnabled() ? app.aaps.core.ui.R.raw.boluserror : null);
             } else {
                 splitActiveTbr(); // Split any active TBR so when we recover from the uncertain TBR status,we only cancel the part after the cancellation
             }
@@ -630,7 +610,7 @@ public class AapsOmnipodErosManager {
         addSuccessToHistory(PodHistoryEntryType.SUSPEND_DELIVERY, null);
         createSuspendedFakeTbrIfNotExists();
 
-        dismissNotification(NotificationId.FAILED_UPDATE_PROFILE);
+        dismissNotification(NotificationId.PUMP_TIMEZONE_UPDATE_FAILED);
         dismissNotification(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC);
 
         return pumpEnactResultProvider.get().success(true).enacted(true);
@@ -643,21 +623,21 @@ public class AapsOmnipodErosManager {
         } catch (CommandFailedAfterChangingDeliveryStatusException ex) {
             createSuspendedFakeTbrIfNotExists();
             if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_suspended), NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
+                showNotification(NotificationId.PUMP_TIMEZONE_UPDATE_FAILED, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_suspended), NotificationLevel.IMPORTANT, app.aaps.core.ui.R.raw.boluserror);
             }
             String errorMessage = translateException(ex.getCause());
             addFailureToHistory(PodHistoryEntryType.SET_TIME, errorMessage);
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(errorMessage);
         } catch (PrecedingCommandFailedUncertainlyException ex) {
             if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_might_be_suspended), NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
+                showNotification(NotificationId.PUMP_TIMEZONE_UPDATE_FAILED, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_might_be_suspended), NotificationLevel.IMPORTANT, app.aaps.core.ui.R.raw.boluserror);
             }
             String errorMessage = translateException(ex.getCause());
             addFailureToHistory(PodHistoryEntryType.SET_TIME, errorMessage);
             return pumpEnactResultProvider.get().success(false).enacted(false).comment(errorMessage);
         } catch (Exception ex) {
             if (showNotifications) {
-                showNotification(NotificationId.FAILED_UPDATE_PROFILE, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_might_be_suspended), NotificationLevel.URGENT, app.aaps.core.ui.R.raw.boluserror);
+                showNotification(NotificationId.PUMP_TIMEZONE_UPDATE_FAILED, getStringResource(R.string.omnipod_eros_error_set_time_failed_delivery_might_be_suspended), NotificationLevel.IMPORTANT, app.aaps.core.ui.R.raw.boluserror);
             }
             String errorMessage = translateException(ex);
             addFailureToHistory(PodHistoryEntryType.SET_TIME, errorMessage);
@@ -666,7 +646,7 @@ public class AapsOmnipodErosManager {
 
         addSuccessToHistory(PodHistoryEntryType.SET_TIME, null);
 
-        dismissNotification(NotificationId.FAILED_UPDATE_PROFILE);
+        dismissNotification(NotificationId.PUMP_TIMEZONE_UPDATE_FAILED);
         dismissNotification(NotificationId.OMNIPOD_POD_SUSPENDED);
         dismissNotification(NotificationId.OMNIPOD_TIME_OUT_OF_SYNC);
 
@@ -1049,7 +1029,7 @@ public class AapsOmnipodErosManager {
     }
 
     private void showPodFaultNotification(FaultEventCode faultEventCode, Integer sound) {
-        notificationManager.post(NotificationId.OMNIPOD_POD_FAULT, createPodFaultErrorMessage(faultEventCode), NotificationLevel.URGENT, 0, sound, java.util.Collections.emptyList(), null);
+        notificationManager.post(NotificationId.OMNIPOD_POD_FAULT, createPodFaultErrorMessage(faultEventCode), NotificationLevel.IMPORTANT, 0, sound, java.util.Collections.emptyList(), null);
     }
 
     private void showNotification(NotificationId id, String message, NotificationLevel level, Integer sound) {

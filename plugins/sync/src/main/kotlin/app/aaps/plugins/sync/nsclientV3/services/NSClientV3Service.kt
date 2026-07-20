@@ -8,6 +8,7 @@ import android.os.PowerManager
 import androidx.annotation.OpenForTesting
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.configuration.Config
+import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.notifications.NotificationAction
@@ -17,20 +18,25 @@ import app.aaps.core.interfaces.notifications.NotificationManager
 import app.aaps.core.interfaces.nsclient.NSAlarm
 import app.aaps.core.interfaces.nsclient.NSClientRepository
 import app.aaps.core.interfaces.nsclient.StoreDataForDb
-import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.LongComposedKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.nssdk.interfaces.RunningConfiguration
+import app.aaps.core.nssdk.mapper.toCalibrationMbg
 import app.aaps.core.nssdk.mapper.toNSDeviceStatus
 import app.aaps.core.nssdk.mapper.toNSFood
 import app.aaps.core.nssdk.mapper.toNSSgvV3
 import app.aaps.core.nssdk.mapper.toNSTreatment
-import app.aaps.plugins.sync.nsShared.NSAlarmObject
-import app.aaps.plugins.sync.nsShared.NsIncomingDataProcessor
-import app.aaps.plugins.sync.nsclient.data.NSDeviceStatusHandler
+import app.aaps.plugins.sync.nsclientV3.NSAlarmObject
 import app.aaps.plugins.sync.nsclientV3.NSClientV3Plugin
+import app.aaps.plugins.sync.nsclientV3.NsIncomingDataProcessor
+import app.aaps.plugins.sync.nsclientV3.SettingsIdentifiers
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.ClientControlPublisher
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.OrphanDetector
+import app.aaps.plugins.sync.nsclientV3.data.NSDeviceStatusHandler
+import app.aaps.plugins.sync.nsclientV3.extensions.toRunningConfiguration
 import app.aaps.plugins.sync.nsclientV3.keys.NsclientBooleanKey
 import dagger.android.DaggerService
 import io.reactivex.rxjava3.disposables.CompositeDisposable
@@ -38,6 +44,8 @@ import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.emitter.Emitter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
@@ -54,10 +62,12 @@ class NSClientV3Service : DaggerService() {
     @Inject lateinit var config: Config
     @Inject lateinit var nsIncomingDataProcessor: NsIncomingDataProcessor
     @Inject lateinit var storeDataForDb: StoreDataForDb
-    @Inject lateinit var activePlugin: ActivePlugin
     @Inject lateinit var notificationManager: NotificationManager
     @Inject lateinit var nsDeviceStatusHandler: NSDeviceStatusHandler
     @Inject lateinit var nsClientRepository: NSClientRepository
+    @Inject lateinit var runningConfiguration: RunningConfiguration
+    @Inject lateinit var orphanDetector: OrphanDetector
+    @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private val disposable = CompositeDisposable()
 
@@ -92,7 +102,15 @@ class NSClientV3Service : DaggerService() {
 
     var storageSocket: Socket? = null
     var alarmSocket: Socket? = null
-    internal var wsConnected = false
+
+    /**
+     * WS connection state. Pass-through to [NSClientV3Plugin.wsConnectedFlow] — the plugin is
+     * the singleton that survives service rebinds, so the canonical StateFlow lives there and
+     * UI subscribers don't get torn down across service lifecycles.
+     */
+    internal var wsConnected: Boolean
+        get() = nsClientV3Plugin.wsConnectedFlow.value
+        set(value) = nsClientV3Plugin.setWsConnected(value)
 
     @OpenForTesting
     fun shutdownWebsockets() {
@@ -141,33 +159,41 @@ class NSClientV3Service : DaggerService() {
         val urlStorage = preferences.get(StringKey.NsClientUrl).lowercase().replace(Regex("/$"), "") + "/storage"
         val urlAlarm = preferences.get(StringKey.NsClientUrl).lowercase().replace(Regex("/$"), "") + "/alarm"
         try {
-            // java io.client doesn't support multiplexing. create 2 sockets
-            storageSocket = IO.socket(urlStorage).also { socket ->
-                socket.on(Socket.EVENT_CONNECT, onConnectStorage)
-                socket.on(Socket.EVENT_DISCONNECT, onDisconnectStorage)
-                nsClientRepository.addLog("► WS", "do connect storage $reason")
-                socket.connect()
-                socket.on("create", onDataCreateUpdate)
-                socket.on("update", onDataCreateUpdate)
-                socket.on("delete", onDataDelete)
-            }
+            // java io.client doesn't support multiplexing. create 2 sockets.
+            // Assign the field BEFORE attaching listeners / connecting: IO.socket() has already inserted the
+            // socket into socket.io's process-static, never-pruned Manager.nsps cache, so if anything below
+            // throws it must still be reachable by shutdownWebsockets(). Otherwise the socket is orphaned in
+            // nsps with our listeners attached and leaks this service for the process lifetime
+            // (LeakCanary: reconnect Timer → Manager.nsps → Socket.callbacks["disconnect"] → this service).
+            val storage = IO.socket(urlStorage)
+            storageSocket = storage
+            storage.on(Socket.EVENT_CONNECT, onConnectStorage)
+            storage.on(Socket.EVENT_DISCONNECT, onDisconnectStorage)
+            storage.on("create", onDataCreateUpdate)
+            storage.on("update", onDataCreateUpdate)
+            storage.on("delete", onDataDelete)
+            nsClientRepository.addLog("► WS", "do connect storage $reason")
+            storage.connect()
             if (preferences.get(BooleanKey.NsClientNotificationsFromAnnouncements) ||
                 preferences.get(BooleanKey.NsClientNotificationsFromAlarms)
-            )
-                alarmSocket = IO.socket(urlAlarm).also { socket ->
-                    socket.on(Socket.EVENT_CONNECT, onConnectAlarms)
-                    socket.on(Socket.EVENT_DISCONNECT, onDisconnectAlarm)
-                    nsClientRepository.addLog("► WS", "do connect alarm $reason")
-                    socket.connect()
-                    socket.on("announcement", onAnnouncement)
-                    socket.on("alarm", onAlarm)
-                    socket.on("urgent_alarm", onUrgentAlarm)
-                    socket.on("clear_alarm", onClearAlarm)
-                }
+            ) {
+                val alarm = IO.socket(urlAlarm)
+                alarmSocket = alarm
+                alarm.on(Socket.EVENT_CONNECT, onConnectAlarms)
+                alarm.on(Socket.EVENT_DISCONNECT, onDisconnectAlarm)
+                alarm.on("announcement", onAnnouncement)
+                alarm.on("alarm", onAlarm)
+                alarm.on("urgent_alarm", onUrgentAlarm)
+                alarm.on("clear_alarm", onClearAlarm)
+                nsClientRepository.addLog("► WS", "do connect alarm $reason")
+                alarm.connect()
+            }
         } catch (_: URISyntaxException) {
+            shutdownWebsockets()
             nsClientRepository.addLog("● WS", "Wrong URL syntax")
-        } catch (_: RuntimeException) {
-            nsClientRepository.addLog("● WS", "RuntimeException")
+        } catch (e: RuntimeException) {
+            shutdownWebsockets()
+            nsClientRepository.addLog("● WS", "RuntimeException: ${e.message}")
         }
     }
 
@@ -186,7 +212,7 @@ class NSClientV3Service : DaggerService() {
                     nsClientRepository.addLog("◄ WS", "Subscribed for: ${response.optString("collections")}")                    // during disconnection updated data is not received
                     // thus run non WS load to get missing data
                     nsClientV3Plugin.initialLoadFinished = false
-                    nsClientV3Plugin.executeLoop("WS_CONNECT", forceNew = true)
+                    nsClientV3Plugin.executeLoop("WS_CONNECT")
                     true
                 } else {
                     nsClientRepository.addLog("◄ WS", "Auth failed")
@@ -244,14 +270,22 @@ class NSClientV3Service : DaggerService() {
             nsClientV3Plugin.storeLastLoadedSrvModified()
         }
         when (collection) {
-            "devicestatus" -> docString.toNSDeviceStatus().let { nsDeviceStatusHandler.handleNewData(arrayOf(it)) }
-            "entries"      -> docString.toNSSgvV3()?.let {
-                nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
-                storeDataForDb.requestStoreGlucoseValues()
+            "devicestatus" -> docString.toNSDeviceStatus().let { nsDeviceStatusHandler.handleNewData(arrayOf(it), live = true) }
+
+            "entries"      -> {
+                docString.toNSSgvV3()?.let {
+                    nsIncomingDataProcessor.processSgvs(listOf(it), doFullSync = false)
+                    storeDataForDb.requestStoreGlucoseValues()
+                }
+                // Same entries collection also carries AAPS calibration mbg entries (marked).
+                docString.toCalibrationMbg()?.let {
+                    nsIncomingDataProcessor.processCalibrations(listOf(it), doFullSync = false)
+                    storeDataForDb.requestStoreCalibrationEntries()
+                }
             }
 
             "profile"      ->
-                nsIncomingDataProcessor.processProfile(docJson, doFullSync = false)
+                appScope.launch { nsIncomingDataProcessor.processProfile(docJson, doFullSync = false) }
 
             "treatments"   -> docString.toNSTreatment()?.let {
                 nsIncomingDataProcessor.processTreatments(listOf(it), doFullSync = false)
@@ -263,7 +297,40 @@ class NSClientV3Service : DaggerService() {
                 storeDataForDb.requestStoreFoods()
             }
 
-            "settings"     -> { /* nothing to do for now */
+            "settings"     -> {
+                val identifier = docJson.optString("identifier")
+                when {
+                    // Client-side: cold config doc — apply everything except the active scene.
+                    config.AAPSCLIENT && identifier == SettingsIdentifiers.COLD                                   ->
+                        docString.toRunningConfiguration()?.let {
+                            runningConfiguration.applyCold(it)
+                            orphanDetector.onSettingsDoc(it, docJson.optLong("srvModified", 0L))
+                            // A live config push proves the master is alive now → feed the liveness clock.
+                            nsClientV3Plugin.bumpMasterSignal(srvModified)
+                        }
+                    // Client-side: hot state doc — apply only the active scene + runtime flags.
+                    // Kept distinct from the cold branch so this never clears a running scene.
+                    config.AAPSCLIENT && identifier == SettingsIdentifiers.STATE                                  ->
+                        docString.toRunningConfiguration()?.let {
+                            runningConfiguration.applyHot(it)
+                            nsClientV3Plugin.bumpMasterSignal(srvModified)
+                        }
+                    // Client-side: master→client command ACK. Must be checked BEFORE the generic
+                    // IDENTIFIER_PREFIX branch (ack identifiers share that prefix) so the master
+                    // receiver never tries to verify an ack as an inbound command envelope.
+                    config.AAPSCLIENT && identifier.startsWith(ClientControlPublisher.IDENTIFIER_ACK_PREFIX)      ->
+                        nsClientV3Plugin.handleClientControlAckEvent(docJson)
+                    // Client-side: master→client live bolus-progress mirror. Same ordering rule as ACK (shares
+                    // IDENTIFIER_PREFIX) so the master never treats its own progress doc as an inbound command.
+                    config.AAPSCLIENT && identifier.startsWith(ClientControlPublisher.IDENTIFIER_PROGRESS_PREFIX) ->
+                        nsClientV3Plugin.handleClientControlProgressEvent(docJson)
+                    // Master-side: route client-control envelopes (paired-client → master commands)
+                    // to the receiver. The plugin gates on the master toggle internally.
+                    // !config.AAPSCLIENT: NS WS echoes every write back to the sender too — a client must not
+                    // self-process its own outgoing commands (unknown clientId → deleteSettings → HTTP 410 tombstone).
+                    !config.AAPSCLIENT && identifier.startsWith(ClientControlPublisher.IDENTIFIER_PREFIX) ->
+                        nsClientV3Plugin.handleClientControlSettingsEvent(identifier, docJson)
+                }
             }
         }
     }
@@ -369,8 +436,15 @@ class NSClientV3Service : DaggerService() {
                 else -> app.aaps.core.ui.R.string.snooze_60m
             }
             NotificationAction(labelRes) {
-                activePlugin.activeNsClient?.handleClearAlarm(nsAlarm, minutes * 60 * 1000L)
-                preferences.put(LongComposedKey.NotificationSnoozedTo, nsAlarm.level.toString(), value = System.currentTimeMillis() + minutes * 60 * 1000L)
+                val snoozeMs = minutes * 60 * 1000L
+                nsClientV3Plugin.handleClearAlarm(nsAlarm, snoozeMs)
+                // Cascade the snooze across all alarm levels. NS itself cascades a level-2 ack down to
+                // level 1, but keeps emitting lower-level forecast alarms (e.g. ar2 WARN) that would
+                // otherwise slip past a single-level local snooze and re-alarm. Snoozing every level
+                // makes the chosen interval authoritative on this device regardless of NS churn.
+                val snoozedUntil = System.currentTimeMillis() + snoozeMs
+                for (level in 0..2)
+                    preferences.put(LongComposedKey.NotificationSnoozedTo, level.toString(), value = snoozedUntil)
             }
         }
 
@@ -387,7 +461,6 @@ class NSClientV3Service : DaggerService() {
             1    -> notificationManager.post(
                 id = NotificationId.NS_ALARM,
                 text = nsAlarm.title,
-                level = NotificationLevel.NORMAL,
                 soundRes = app.aaps.core.ui.R.raw.alarm,
                 actions = snoozeActions(nsAlarm)
             )
@@ -395,7 +468,6 @@ class NSClientV3Service : DaggerService() {
             2    -> notificationManager.post(
                 id = NotificationId.NS_URGENT_ALARM,
                 text = nsAlarm.title,
-                level = NotificationLevel.URGENT,
                 soundRes = app.aaps.core.ui.R.raw.urgentalarm,
                 actions = snoozeActions(nsAlarm)
             )

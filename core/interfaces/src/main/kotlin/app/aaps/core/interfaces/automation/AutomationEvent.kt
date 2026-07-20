@@ -1,11 +1,11 @@
 package app.aaps.core.interfaces.automation
 
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import app.aaps.core.interfaces.navigation.ElementType
 
 data class AutomationIconData(
     val icon: ImageVector,
-    val tint: Color? = null
+    val elementType: ElementType? = null
 )
 
 interface AutomationEvent {
@@ -13,6 +13,9 @@ interface AutomationEvent {
     val id: String
     var isEnabled: Boolean
     var title: String
+
+    /** True when this event is exposed as a user-tappable action (Overview button / wear tile / quick-launch). */
+    var userAction: Boolean
     suspend fun canRun(): Boolean
     suspend fun preconditionCanRun(): Boolean
     fun firstActionIcon(): AutomationIconData?

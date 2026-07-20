@@ -12,6 +12,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,32 +36,38 @@ import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.constraints.Objectives
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.maintenance.FileListProvider
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PermissionGroup
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.protection.ProtectionCheck
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
+import app.aaps.core.interfaces.rx.events.EventShowSnackbar
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.ComposablePluginContent
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.core.ui.compose.ToolbarConfig
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.ui.compose.navigation.LocalPluginNavigationRequest
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PluginPreferencesScreen
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.compose.siteRotation.SiteLocationPickerScreen
+import app.aaps.plugins.automation.AutomationRuntime
 import app.aaps.plugins.configuration.setupwizard.SWDefinition
 import app.aaps.plugins.configuration.setupwizard.SetupWizardScreen
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.compose.AuthorizedClientsScreen
+import app.aaps.plugins.sync.nsclientV3.clientcontrol.compose.PairWithMasterScreen
 import app.aaps.ui.compose.calibrationDialog.CalibrationDialogScreen
 import app.aaps.ui.compose.carbsDialog.CarbsDialogScreen
 import app.aaps.ui.compose.careDialog.CareDialogScreen
+import app.aaps.ui.compose.configuration.ConfigurationScreen
 import app.aaps.ui.compose.configuration.ConfigurationViewModel
 import app.aaps.ui.compose.extendedBolusDialog.ExtendedBolusDialogScreen
 import app.aaps.ui.compose.fillDialog.FillDialogScreen
@@ -68,10 +75,10 @@ import app.aaps.ui.compose.history.HistoryScreen
 import app.aaps.ui.compose.insulinDialog.InsulinDialogScreen
 import app.aaps.ui.compose.insulinManagement.InsulinManagementScreen
 import app.aaps.ui.compose.insulinManagement.InsulinManagementViewModel
-import app.aaps.ui.compose.main.MainViewModel
 import app.aaps.ui.compose.maintenance.ImportSettingsScreen
 import app.aaps.ui.compose.maintenance.ImportSource
 import app.aaps.ui.compose.maintenance.ImportViewModel
+import app.aaps.ui.compose.overview.chips.ChipsViewModel
 import app.aaps.ui.compose.preferences.AllPreferencesScreen
 import app.aaps.ui.compose.preferences.PreferenceScreenView
 import app.aaps.ui.compose.profileHelper.ProfileHelperScreen
@@ -90,7 +97,6 @@ import app.aaps.ui.compose.runningMode.RunningModeScreen
 import app.aaps.ui.compose.scenes.SceneListScreen
 import app.aaps.ui.compose.scenes.wizard.SceneWizardScreen
 import app.aaps.ui.compose.siteRotationDialog.SiteRotationManagementScreen
-import app.aaps.ui.compose.siteRotationDialog.SiteRotationSettingsScreen
 import app.aaps.ui.compose.siteRotationDialog.viewModels.SiteRotationManagementViewModel
 import app.aaps.ui.compose.stats.StatsScreen
 import app.aaps.ui.compose.stats.viewmodels.StatsViewModel
@@ -123,7 +129,6 @@ fun NavHostController.safePopBackStack() {
 fun NavGraphBuilder.appNavGraph(
     navController: NavHostController,
     // ViewModels
-    mainViewModel: MainViewModel,
     insulinManagementViewModel: InsulinManagementViewModel,
     profileManagementViewModel: ProfileManagementViewModel,
     profileEditorViewModel: ProfileEditorViewModel,
@@ -137,16 +142,18 @@ fun NavGraphBuilder.appNavGraph(
     statsViewModel: StatsViewModel,
     siteRotationManagementViewModel: SiteRotationManagementViewModel,
     graphViewModel: app.aaps.ui.compose.overview.graphs.GraphViewModel,
+    chipsViewModel: ChipsViewModel,
     // Dependencies
     swDefinition: SWDefinition,
     rxBus: RxBus,
     activePlugin: ActivePlugin,
+    automationRuntime: AutomationRuntime,
     preferences: Preferences,
     rh: ResourceHelper,
     builtInSearchables: BuiltInSearchables,
     prefFileList: FileListProvider,
     persistenceLayer: PersistenceLayer,
-    visibilityContext: PreferenceVisibilityContext,
+    visibilityContext: VisibilityContext,
     // Callbacks
     onNavigationRequest: (NavigationRequest, NavHostController) -> Unit,
     onShowDeliveryError: (comment: String, titleResId: Int) -> Unit,
@@ -194,6 +201,7 @@ fun NavGraphBuilder.appNavGraph(
                     navController.navigate(AppRoute.ProfileActivation.createRoute(index))
                 }
             },
+            onAddProfile = { navController.navigate(AppRoute.ProfileEditorNew.route) },
             onInsulinManager = { navController.navigate(AppRoute.InsulinManagement.createRoute(mode)) }
         )
     }
@@ -236,7 +244,6 @@ fun NavGraphBuilder.appNavGraph(
     composable(AppRoute.RunningMode.route) {
         RunningModeScreen(
             viewModel = runningModeManagementViewModel,
-            showOkCancel = true,
             onNavigateBack = { navController.safePopBackStack() }
         )
     }
@@ -283,8 +290,8 @@ fun NavGraphBuilder.appNavGraph(
         CarbsDialogScreen(
             carbsButtonsDef = builtInSearchables.carbsButtons,
             bgInfoState = graphViewModel.bgInfoState,
-            iobUiState = graphViewModel.iobUiState,
-            cobUiState = graphViewModel.cobUiState,
+            iobUiState = chipsViewModel.iobUiState,
+            cobUiState = chipsViewModel.cobUiState,
             onNavigateBack = { navController.safePopBackStack() },
             onShowDeliveryError = { comment ->
                 onShowDeliveryError(comment, app.aaps.core.ui.R.string.treatmentdeliveryerror)
@@ -296,8 +303,8 @@ fun NavGraphBuilder.appNavGraph(
         InsulinDialogScreen(
             insulinButtonsDef = builtInSearchables.insulinButtons,
             bgInfoState = graphViewModel.bgInfoState,
-            iobUiState = graphViewModel.iobUiState,
-            cobUiState = graphViewModel.cobUiState,
+            iobUiState = chipsViewModel.iobUiState,
+            cobUiState = chipsViewModel.cobUiState,
             onNavigateBack = { navController.safePopBackStack() },
             onShowDeliveryError = { comment ->
                 onShowDeliveryError(comment, app.aaps.core.ui.R.string.treatmentdeliveryerror)
@@ -308,8 +315,8 @@ fun NavGraphBuilder.appNavGraph(
     composable(route = AppRoute.TreatmentDialog.route) {
         TreatmentDialogScreen(
             bgInfoState = graphViewModel.bgInfoState,
-            iobUiState = graphViewModel.iobUiState,
-            cobUiState = graphViewModel.cobUiState,
+            iobUiState = chipsViewModel.iobUiState,
+            cobUiState = chipsViewModel.cobUiState,
             onNavigateBack = { navController.safePopBackStack() },
             onShowDeliveryError = { comment ->
                 onShowDeliveryError(comment, app.aaps.core.ui.R.string.treatmentdeliveryerror)
@@ -401,9 +408,10 @@ fun NavGraphBuilder.appNavGraph(
             initialTimestamp = profileManagementViewModel.dateUtil.nowWithoutMilliseconds(),
             rh = rh,
             onNavigateBack = { navController.safePopBackStack() },
+            checkPumpCompatible = { percentage -> profileManagementViewModel.isPumpCompatible(profileIndex, percentage) },
             onActivate = { duration, percentage, timeshift, withTT, notes, timestamp, timeChanged ->
                 coroutineScope.launch {
-                    val success = profileManagementViewModel.activateProfile(
+                    profileManagementViewModel.activateProfile(
                         profileIndex = profileIndex,
                         durationMinutes = duration,
                         percentage = percentage,
@@ -411,11 +419,12 @@ fun NavGraphBuilder.appNavGraph(
                         withTT = withTT,
                         notes = notes,
                         timestamp = timestamp,
-                        timeChanged = timeChanged
+                        timeChanged = timeChanged,
+                        // Close only AFTER the user confirms and the switch actually commits (not when the confirm
+                        // dialog is merely shown). inclusive = true pops the Profile management screen too, so we
+                        // return to the screen it was opened from (e.g. Overview).
+                        onSuccess = { navController.popBackStack(AppRoute.Profile.route, inclusive = true) }
                     )
-                    if (success) {
-                        navController.popBackStack(AppRoute.Profile.route, inclusive = false)
-                    }
                 }
             }
         )
@@ -430,6 +439,20 @@ fun NavGraphBuilder.appNavGraph(
         LaunchedEffect(Unit) {
             if (!initialized.value) {
                 profileEditorViewModel.selectProfile(profileIndex)
+                initialized.value = true
+            }
+        }
+        ProfileEditorScreen(
+            viewModel = profileEditorViewModel,
+            onBackClick = { navController.safePopBackStack() }
+        )
+    }
+
+    composable(AppRoute.ProfileEditorNew.route) {
+        val initialized = rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            if (!initialized.value) {
+                profileEditorViewModel.startNewProfileDraft()
                 initialized.value = true
             }
         }
@@ -480,16 +503,22 @@ fun NavGraphBuilder.appNavGraph(
         route = AppRoute.PluginContent.route,
         arguments = listOf(navArgument("pluginIndex") { type = NavType.IntType })
     ) { backStackEntry ->
-        val pluginIndex = backStackEntry.arguments?.getInt("pluginIndex") ?: return@composable
-        val plugin = activePlugin.getPluginsList().getOrNull(pluginIndex) ?: return@composable
-        val composeContent = plugin.getComposeContent()
-        if (composeContent is ComposablePluginContent) {
+        val pluginIndex = backStackEntry.arguments?.getInt("pluginIndex") ?: -1
+        val plugin = activePlugin.getPluginsList().getOrNull(pluginIndex)
+        val composeContent = plugin?.getComposeContent()
+        if (plugin != null && composeContent is ComposablePluginContent) {
             PluginContentRoute(
                 navController = navController,
                 plugin = plugin,
                 composeContent = composeContent,
                 onNavigationRequest = onNavigationRequest,
                 withProtection = withProtection,
+            )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
             )
         }
     }
@@ -499,6 +528,16 @@ fun NavGraphBuilder.appNavGraph(
         QuickLauchConfigScreen(
             viewModel = quickLaunchConfigViewModel,
             onNavigateBack = { navController.safePopBackStack() }
+        )
+    }
+
+    composable(AppRoute.AutomationList.route) {
+        // remember so the content wrapper isn't re-allocated on every recomposition of the route.
+        val automationContent = remember { automationRuntime.composeContent() }
+        AutomationContentRoute(
+            navController = navController,
+            composeContent = automationContent,
+            withProtection = withProtection,
         )
     }
 
@@ -514,6 +553,18 @@ fun NavGraphBuilder.appNavGraph(
         )
     }
 
+    composable(AppRoute.AuthorizedClients.route) {
+        AuthorizedClientsScreen(
+            onNavigateBack = { navController.popBackStack() }
+        )
+    }
+
+    composable(AppRoute.PairWithMaster.route) {
+        PairWithMasterScreen(
+            onNavigateBack = { navController.popBackStack() }
+        )
+    }
+
     composable(AppRoute.SceneWizard.route) {
         SceneWizardScreen(
             onFinished = { navController.popBackStack() },
@@ -523,9 +574,32 @@ fun NavGraphBuilder.appNavGraph(
 
     composable(AppRoute.Configuration.route) {
         val configState by configurationViewModel.uiState.collectAsStateWithLifecycle()
-        app.aaps.ui.compose.configuration.ConfigurationScreen(
+        ConfigurationScreen(
             categories = configState.categories,
             hardwarePumpConfirmation = configState.hardwarePumpConfirmation,
+            onNavigateBack = { navController.safePopBackStack() },
+            onNavigateToCategory = { type ->
+                navController.navigate(AppRoute.PluginCategory.createRoute(type.ordinal))
+            },
+            onConfirmHardwarePump = {
+                configurationViewModel.confirmHardwarePumpSwitch()
+                onRefreshPermissions()
+            },
+            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() }
+        )
+    }
+
+    composable(
+        AppRoute.PluginCategory.route,
+        arguments = listOf(navArgument("typeOrdinal") { type = NavType.IntType })
+    ) { backStackEntry ->
+        val typeOrdinal = backStackEntry.arguments?.getInt("typeOrdinal") ?: return@composable
+        val configState by configurationViewModel.uiState.collectAsStateWithLifecycle()
+        val category = configState.categories.find { it.type.ordinal == typeOrdinal }
+        app.aaps.ui.compose.configuration.PluginCategoryScreen(
+            category = category,
+            hardwarePumpConfirmation = configState.hardwarePumpConfirmation,
+            pluginSwitchConfirmation = configState.pluginSwitchConfirmation,
             onNavigateBack = { navController.safePopBackStack() },
             onNavigate = { request -> onNavigationRequest(request, navController) },
             onPluginEnableToggle = { pluginId, type, enabled ->
@@ -536,7 +610,12 @@ fun NavGraphBuilder.appNavGraph(
                 configurationViewModel.confirmHardwarePumpSwitch()
                 onRefreshPermissions()
             },
-            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() }
+            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() },
+            onConfirmPluginSwitch = {
+                configurationViewModel.confirmPluginSwitch()
+                onRefreshPermissions()
+            },
+            onDismissPluginSwitch = { configurationViewModel.dismissPluginSwitchDialog() }
         )
     }
 
@@ -551,6 +630,12 @@ fun NavGraphBuilder.appNavGraph(
                 visibilityContext = visibilityContext,
                 onBackClick = { navController.safePopBackStack() }
             )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
+            )
         }
     }
 
@@ -563,6 +648,12 @@ fun NavGraphBuilder.appNavGraph(
                 screenDef = screenDef,
                 highlightKey = highlightKey,
                 onBackClick = { navController.safePopBackStack() }
+            )
+        } else {
+            NavigationErrorFallback(
+                rxBus = rxBus,
+                message = stringResource(app.aaps.core.ui.R.string.navigation_error_screen_not_found),
+                onDismiss = { navController.safePopBackStack() }
             )
         }
     }
@@ -612,16 +703,7 @@ fun NavGraphBuilder.appNavGraph(
         SiteRotationManagementScreen(
             viewModel = siteRotationManagementViewModel,
             onClose = { navController.safePopBackStack() },
-            onPreferenceClick = {
-                navController.navigate(AppRoute.SiteRotationSettings.route)
-            }
-        )
-    }
-
-    composable(AppRoute.SiteRotationSettings.route) {
-        SiteRotationSettingsScreen(
-            viewModel = siteRotationManagementViewModel,
-            onNavigateBack = { navController.safePopBackStack() }
+            siteRotationDef = builtInSearchables.siteRotation
         )
     }
 
@@ -635,10 +717,14 @@ fun NavGraphBuilder.appNavGraph(
             onBack = { navController.safePopBackStack() },
             onImportSettings = { navController.navigate(AppRoute.ImportSettings.createRoute("LOCAL")) },
             onPluginPreferences = { pluginId -> navController.navigate(AppRoute.PluginPreferences.createRoute(pluginId)) },
+            onPluginOpen = { pluginId -> onNavigationRequest(NavigationRequest.Plugin(pluginId), navController) },
             onSetMasterPassword = { navController.navigate(AppRoute.PreferenceScreen.createRoute("protection", StringKey.ProtectionMasterPassword.key)) },
             onManageInsulin = { navController.navigate(AppRoute.InsulinManagement.createRoute()) },
             onManageProfile = { navController.navigate(AppRoute.Profile.createRoute()) },
             onProfileSwitch = { navController.navigate(AppRoute.ProfileActivation.createRoute(0)) },
+            onOpenAuthorizedClients = { navController.navigate(AppRoute.AuthorizedClients.route) },
+            onPairWithMaster = { navController.navigate(AppRoute.PairWithMaster.route) },
+            onOpenNsReceiveSettings = { navController.navigate(AppRoute.PreferenceScreen.createRoute("ns_client_synchronization")) },
             onRunObjectives = {
                 val index = activePlugin.getPluginsList().indexOfFirst { it is Objectives }
                 if (index >= 0) navController.navigate(AppRoute.PluginContent.createRoute(index))
@@ -710,15 +796,106 @@ private fun PluginContentRoute(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
+            // remember so the lambda identity stays stable across recompositions —
+            // otherwise CompositionLocalProvider invalidates every consumer in the subtree
+            // on every PluginContentRoute recomposition.
+            val navigationRequestLambda = remember(onNavigationRequest, navController) {
+                { request: NavigationRequest -> onNavigationRequest(request, navController) }
+            }
+            CompositionLocalProvider(LocalPluginNavigationRequest provides navigationRequestLambda) {
+                composeContent.Render(
+                    setToolbarConfig = { config -> toolbarConfig = config },
+                    onNavigateBack = { navController.safePopBackStack() },
+                    onSettings = {
+                        onNavigationRequest(
+                            NavigationRequest.PluginPreferences(plugin.javaClass.simpleName),
+                            navController
+                        )
+                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Fallback for routes whose navigation target cannot be resolved (unknown preference key, missing
+ * plugin index, …). Replaces the previous behaviour where such routes rendered nothing, leaving the
+ * user on a blank, stuck screen: posts an error snackbar via [rxBus] and immediately pops back so
+ * the dead route never stays on screen.
+ */
+@Composable
+private fun NavigationErrorFallback(
+    rxBus: RxBus,
+    message: String,
+    onDismiss: () -> Unit
+) {
+    LaunchedEffect(Unit) {
+        rxBus.send(EventShowSnackbar(message, EventShowSnackbar.Type.Error))
+        onDismiss()
+    }
+}
+
+/**
+ * Host for the standalone Automation screen — mirrors [PluginContentRoute] but sources its content
+ * from [AutomationRuntime.composeContent] instead of a plugin, and opens the settings subscreen via
+ * the generic [AppRoute.PreferenceScreen] route. Automation does not use `LocalPluginNavigationRequest`.
+ */
+@Composable
+private fun AutomationContentRoute(
+    navController: NavHostController,
+    composeContent: ComposablePluginContent,
+    withProtection: (ProtectionCheck.Protection, () -> Unit) -> Unit,
+) {
+    val openSettings = {
+        withProtection(ElementType.SETTINGS.protection) {
+            navController.navigate(AppRoute.PreferenceScreen.createRoute("automation_settings"))
+        }
+    }
+    val navigateBack: @Composable () -> Unit = {
+        IconButton(onClick = { navController.safePopBackStack() }) {
+            Icon(
+                Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(app.aaps.core.ui.R.string.back)
+            )
+        }
+    }
+    val settingsAction: @Composable RowScope.() -> Unit = {
+        IconButton(onClick = openSettings) {
+            Icon(
+                Icons.Filled.Settings,
+                contentDescription = stringResource(app.aaps.core.ui.R.string.settings)
+            )
+        }
+    }
+    val title = stringResource(app.aaps.core.ui.R.string.automation)
+    var toolbarConfig by remember {
+        mutableStateOf(
+            ToolbarConfig(
+                title = title,
+                navigationIcon = navigateBack,
+                actions = settingsAction
+            )
+        )
+    }
+    Scaffold(
+        topBar = {
+            AapsTopAppBar(
+                title = { Text(toolbarConfig.title) },
+                navigationIcon = { toolbarConfig.navigationIcon() },
+                actions = { toolbarConfig.actions(this) }
+            )
+        }
+    ) { paddingValues ->
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+        ) {
             composeContent.Render(
                 setToolbarConfig = { config -> toolbarConfig = config },
                 onNavigateBack = { navController.safePopBackStack() },
-                onSettings = {
-                    onNavigationRequest(
-                        NavigationRequest.PluginPreferences(plugin.javaClass.simpleName),
-                        navController
-                    )
-                }
+                onSettings = openSettings
             )
         }
     }
