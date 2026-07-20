@@ -392,7 +392,7 @@ class DashOverviewViewModel @Inject constructor(
                 label = rh.gs(CommonR.string.omnipod_common_pod_management_button_discard_pod),
                 icon = Icons.Filled.Delete,
                 category = ActionCategory.MANAGEMENT,
-                visible = podStateManager.uniqueId != null && podStateManager.isPodKaput,
+                visible = podStateManager.uniqueId != null && podStateManager.activationProgress.isBefore(ActivationProgress.SET_UNIQUE_ID),
                 onClick = { onDiscardPodClicked() }
             )
         )
