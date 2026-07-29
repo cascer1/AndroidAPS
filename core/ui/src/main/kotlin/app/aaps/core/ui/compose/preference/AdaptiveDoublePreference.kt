@@ -13,12 +13,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.decimalPlaces
 import app.aaps.core.keys.interfaces.DoublePreferenceKey
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.keys.rangeResId
 import app.aaps.core.keys.step
 import app.aaps.core.keys.unitLabelResId
@@ -32,13 +30,15 @@ import java.text.DecimalFormat
  *
  * @param titleResId Optional title resource ID. If 0 or not provided, uses doubleKey.titleResId
  * @param visibilityContext Optional context for evaluating runtime visibility/enabled conditions
+ *
+ * @see AdaptiveDoublePreferencePreview
  */
 @Composable
 fun AdaptiveDoublePreferenceItem(
     doubleKey: DoublePreferenceKey,
     titleResId: Int = 0,
     unit: String = "",
-    visibilityContext: PreferenceVisibilityContext? = null
+    visibilityContext: VisibilityContext? = null
 ) {
     val preferences = LocalPreferences.current
     val effectiveTitleResId = if (titleResId != 0) titleResId else doubleKey.titleResId
@@ -87,7 +87,9 @@ fun AdaptiveDoublePreferenceItem(
                 Text(
                     text = stringResource(effectiveTitleResId),
                     style = theme.titleTextStyle,
-                    color = theme.titleColor
+                    // Mirror Preference's disabled styling (the switch row greys the same way) since this
+                    // slider branch builds its own row instead of going through Preference.
+                    color = theme.titleColor.let { if (visibility.enabled) it else it.copy(alpha = theme.disabledOpacity) }
                 )
                 SyncBadge(doubleKey, Modifier.padding(start = 6.dp))
             }
@@ -95,7 +97,7 @@ fun AdaptiveDoublePreferenceItem(
                 Text(
                     text = summary,
                     style = theme.summaryTextStyle,
-                    color = theme.summaryColor
+                    color = theme.summaryColor.let { if (visibility.enabled) it else it.copy(alpha = theme.disabledOpacity) }
                 )
             }
             PreferenceSliderWithButtons(
@@ -112,7 +114,8 @@ fun AdaptiveDoublePreferenceItem(
                 valueFormat = valueFormat,
                 unitLabel = unitLabel,
                 dialogLabel = stringResource(effectiveTitleResId),
-                dialogSummary = summary
+                dialogSummary = summary,
+                enabled = visibility.enabled
             )
         }
     } else {
@@ -131,16 +134,6 @@ fun AdaptiveDoublePreferenceItem(
             },
             enabled = visibility.enabled,
             summary = { Text(summaryText) }
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AdaptiveDoublePreferencePreview() {
-    PreviewTheme {
-        AdaptiveDoublePreferenceItem(
-            doubleKey = DoubleKey.OverviewInsulinButtonIncrement1
         )
     }
 }

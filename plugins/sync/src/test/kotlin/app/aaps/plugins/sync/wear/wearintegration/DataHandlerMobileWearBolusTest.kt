@@ -31,6 +31,8 @@ import app.aaps.core.interfaces.utils.TrendCalculator
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
+import app.aaps.core.objects.wizard.QuickWizardEntry
+import app.aaps.core.objects.wizard.QuickWizardMode
 import app.aaps.shared.tests.TestBaseWithProfile
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -93,7 +95,7 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
             aapsSchedulers, context, rxBus, aapsLogger, rh, preferences, config,
             iobCobCalculator, processedTbrEbData, smbGlucoseStatusProvider, profileFunction, profileUtil,
             loop, processedDeviceStatusData, receiverStatusStore, quickWizard, trendCalculator, dateUtil,
-            constraintsChecker, activePlugin, insulin, commandQueue, fabricPrivacy, uiInteraction,
+            constraintsChecker, activePlugin, commandQueue, fabricPrivacy, uiInteraction,
             persistenceLayer, importExportPrefs, decimalFormatter, pumpStatusProvider,
             ch, runningModeGuard, wizardBolusExecutor, batchExecutor, wizardExecutor
         )
@@ -389,6 +391,99 @@ class DataHandlerMobileWearBolusTest : TestBaseWithProfile() {
 
         assertThat(sent.returnCommand).isInstanceOf(EventData.Error::class.java)
         verifyBlocking(wizardExecutor, never()) { prepare(any(), any()) }
+    }
+
+    // --- QuickWizard tile modes (branch on entry.mode() exactly like the phone's MainViewModel) -----------
+    //
+    // The wear QuickWizard handler used to ALWAYS recompute via WizardExecutor, so a fixed INSULIN button
+    // computed a wizard dose and a CARBS-only button could deliver correction insulin. It now branches:
+    // INSULIN/CARBS → fixed BatchExecutor bolus (ActionBolusConfirmed); WIZARD → recompute (ActionWizardConfirmed).
+
+    /** A mocked synced [QuickWizardEntry] resolved by [guid], with the given mode + fixed amounts. */
+    private fun stubQuickWizard(guid: String, mode: QuickWizardMode, insulin: Double = 0.0, carbs: Int = 0, text: String = "QW"): QuickWizardEntry {
+        val entry = mock<QuickWizardEntry>()
+        whenever(entry.mode()).thenReturn(mode)
+        whenever(entry.insulin()).thenReturn(insulin)
+        whenever(entry.carbs()).thenReturn(carbs)
+        whenever(entry.buttonText()).thenReturn(text)
+        whenever(quickWizard.get(guid)).thenReturn(entry)
+        return entry
+    }
+
+    @Test fun `quick wizard INSULIN mode relays a fixed insulin batch with an ActionBolusConfirmed`() = runTest {
+        stubQuickWizard("g1", QuickWizardMode.INSULIN, insulin = 1.5, text = "Bolus")
+        stubBatchPrepared(11L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 1.50 U")))
+
+        val confirm = capturedConfirm { sut.handleQuickWizardPreCheck(EventData.ActionQuickWizardPreCheck("g1")) }
+
+        val captor = argumentCaptor<List<BatchAction>>()
+        verifyBlocking(batchExecutor) { prepare(captor.capture(), any(), any()) }
+        val bolus = captor.firstValue.single() as BatchAction.Bolus
+        assertThat(bolus.insulin).isEqualTo(1.5)
+        assertThat(bolus.carbs).isEqualTo(0)
+        assertThat(bolus.quickWizardGuid).isEqualTo("g1") // the MASTER marks the entry used on commit via this guid (SOT)
+        // A fixed button must NOT recompute the wizard (the bug).
+        verifyBlocking(wizardExecutor, never()) { prepare(any(), any()) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.ActionBolusConfirmed(11L))
+    }
+
+    @Test fun `quick wizard CARBS mode relays a fixed carbs batch with an ActionBolusConfirmed`() = runTest {
+        stubQuickWizard("g2", QuickWizardMode.CARBS, carbs = 20, text = "Carbs")
+        stubBatchPrepared(12L, lines = listOf(ConfirmationLine(ConfirmationRole.CARBS, "Carbs: 20 g")))
+
+        val confirm = capturedConfirm { sut.handleQuickWizardPreCheck(EventData.ActionQuickWizardPreCheck("g2")) }
+
+        val captor = argumentCaptor<List<BatchAction>>()
+        verifyBlocking(batchExecutor) { prepare(captor.capture(), any(), any()) }
+        val bolus = captor.firstValue.single() as BatchAction.Bolus
+        // Carbs-only: zero insulin (the wizard recompute could have injected a correction bolus).
+        assertThat(bolus.insulin).isEqualTo(0.0)
+        assertThat(bolus.carbs).isEqualTo(20)
+        assertThat(bolus.quickWizardGuid).isEqualTo("g2") // the MASTER marks the entry used on commit via this guid (SOT)
+        verifyBlocking(wizardExecutor, never()) { prepare(any(), any()) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.ActionBolusConfirmed(12L))
+    }
+
+    @Test fun `quick wizard WIZARD mode recomputes via WizardExecutor with an ActionWizardConfirmed`() = runTest {
+        stubQuickWizard("g3", QuickWizardMode.WIZARD, carbs = 30, text = "Wizard")
+        stubWizardPrepared(13L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 2.00 U")))
+
+        val confirm = capturedConfirm { sut.handleQuickWizardPreCheck(EventData.ActionQuickWizardPreCheck("g3")) }
+
+        verifyBlocking(wizardExecutor) { prepare(any<WizardExecutor.WizardSource.QuickWizard>(), any()) }
+        verifyBlocking(batchExecutor, never()) { prepare(any(), any(), any()) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.ActionWizardConfirmed(13L))
+    }
+
+    @Test fun `quick wizard with an unknown guid falls through to the wizard path for a proper not-available error`() = runTest {
+        // quickWizard.get(guid) returns null (entry deleted/unsynced) → no mode to branch on; route to WizardExecutor,
+        // which ships a "quick wizard not available" error rather than silently dropping the tap.
+        whenever(quickWizard.get("gone")).thenReturn(null)
+        stubWizardPrepared(99L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 1.00 U")))
+
+        val confirm = capturedConfirm { sut.handleQuickWizardPreCheck(EventData.ActionQuickWizardPreCheck("gone")) }
+
+        verifyBlocking(wizardExecutor) { prepare(any<WizardExecutor.WizardSource.QuickWizard>(), any()) }
+        verifyBlocking(batchExecutor, never()) { prepare(any(), any(), any()) }
+        assertThat(confirm.returnCommand).isEqualTo(EventData.ActionWizardConfirmed(99L))
+    }
+
+    @Test fun `quick wizard fixed-mode tags the batch with the guid and never marks the entry locally`() = runTest {
+        // SOT: the guid travels in the batch so the MASTER marks the entry used in confirm(); this device must NOT write
+        // the synced QuickWizard pref itself (on a client that pushes it back over the round-trip → "Update settings …
+        // Another action is already in progress").
+        val entry = stubQuickWizard("g4", QuickWizardMode.INSULIN, insulin = 1.0, text = "Bolus")
+        stubBatchPrepared(14L, lines = listOf(ConfirmationLine(ConfirmationRole.BOLUS, "Bolus: 1.00 U")))
+        whenever(batchExecutor.commit(any(), any(), any(), any())).thenReturn(ActionProgress.Applied)
+
+        val captor = argumentCaptor<List<BatchAction>>()
+        capturedConfirm { sut.handleQuickWizardPreCheck(EventData.ActionQuickWizardPreCheck("g4")) }
+        verifyBlocking(batchExecutor) { prepare(captor.capture(), any(), any()) }
+        rxBus.send(EventData.ActionBolusConfirmed(14L))
+        verifyBlocking(batchExecutor, timeout(2000)) { commit(eq(14L), any(), any(), any()) } // the commit handler ran
+
+        assertThat((captor.firstValue.single() as BatchAction.Bolus).quickWizardGuid).isEqualTo("g4")
+        verify(entry, never()).markAsUsed() // …and it did NOT mark locally — the master does, via the guid
     }
 
     // --- Subscription wiring (the onEvent / onEventSync helpers actually register each type) --------------

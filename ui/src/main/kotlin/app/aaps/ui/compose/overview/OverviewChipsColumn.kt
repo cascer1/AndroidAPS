@@ -14,9 +14,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.aaps.core.data.model.RM
 import app.aaps.core.data.model.TT
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.overview.graph.TbrState
 import app.aaps.core.ui.compose.AapsSpacing
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.ui.compose.main.TempTargetChipState
 import app.aaps.ui.compose.overview.chips.CobUiState
@@ -52,6 +52,9 @@ fun OverviewChipsColumn(
     onNavigate: (NavigationRequest) -> Unit,
     onTbrChipClick: () -> Unit,
     onIobChipClick: () -> Unit,
+    // The command chips (running mode / profile / temp target) open mutating screens — their click is disabled on an
+    // unpaired client (same MASTER_OR_PAIRED_CLIENT gate as nav/Manage), while the chip stays visible as status.
+    commandsAllowed: Boolean = true,
     modifier: Modifier = Modifier,
     trailingContent: @Composable (RowScope.() -> Unit)? = null
 ) {
@@ -88,7 +91,8 @@ fun OverviewChipsColumn(
                             tempTargetSceneManaged = tempTargetSceneManaged,
                             tbrState = tbrState,
                             onNavigate = onNavigate,
-                            onTbrChipClick = onTbrChipClick
+                            onTbrChipClick = onTbrChipClick,
+                            commandsAllowed = commandsAllowed
                         )
                     }
                     Row(
@@ -116,7 +120,8 @@ fun OverviewChipsColumn(
                 tempTargetSceneManaged = tempTargetSceneManaged,
                 tbrState = tbrState,
                 onNavigate = onNavigate,
-                onTbrChipClick = onTbrChipClick
+                onTbrChipClick = onTbrChipClick,
+                commandsAllowed = commandsAllowed
             )
         }
         IobCobChipsRow(
@@ -150,7 +155,8 @@ private fun NarrowChips(
     tempTargetSceneManaged: Boolean,
     tbrState: TbrState,
     onNavigate: (NavigationRequest) -> Unit,
-    onTbrChipClick: () -> Unit
+    onTbrChipClick: () -> Unit,
+    commandsAllowed: Boolean
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically
@@ -163,6 +169,7 @@ private fun NarrowChips(
                 remaining = runningModeRemaining,
                 sceneManaged = runningModeSceneManaged,
                 smbEnabled = smbEnabled,
+                enabled = commandsAllowed,
                 onClick = { onNavigate(NavigationRequest.Element(ElementType.RUNNING_MODE)) }
             )
         }
@@ -173,6 +180,7 @@ private fun NarrowChips(
             onClick = { onNavigate(NavigationRequest.Element(ElementType.PROFILE_MANAGEMENT)) },
             sceneManaged = profileSceneManaged,
             isNoProfile = profileName.isEmpty(),
+            enabled = commandsAllowed,
             modifier = Modifier.weight(1f)
         )
     }
@@ -188,7 +196,8 @@ private fun NarrowChips(
                 reason = tempTargetReason,
                 modifier = Modifier.weight(1f),
                 onClick = { onNavigate(NavigationRequest.Element(ElementType.TEMP_TARGET_MANAGEMENT)) },
-                sceneManaged = tempTargetSceneManaged
+                sceneManaged = tempTargetSceneManaged,
+                enabled = commandsAllowed
             )
         }
         TbrChip(

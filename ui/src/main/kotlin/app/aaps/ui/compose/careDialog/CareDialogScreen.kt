@@ -41,13 +41,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TE
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.DateTimeSection
 import app.aaps.core.ui.compose.EventTimeRow
@@ -55,7 +55,6 @@ import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
 import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.siteRotation.SiteLocationSummary
 import app.aaps.ui.R
 import app.aaps.ui.compose.EventDatePicker
@@ -148,8 +147,11 @@ fun CareDialogScreen(
     )
 }
 
+/**
+ * @see CareDialogScreenPreview
+ */
 @Composable
-private fun CareDialogContent(
+internal fun CareDialogContent(
     uiState: CareDialogUiState,
     eventType: CareportalEventType,
     dateString: String,
@@ -348,7 +350,7 @@ private fun BgSection(
             valueRange = minBg..maxBg,
             step = step,
             valueFormat = format,
-            unitLabel = glucoseUnits.asText
+            unitLabel = glucoseUnits.displayLabel
         )
     }
 }
@@ -397,30 +399,4 @@ fun CareportalEventType.toElementType(): ElementType = when (this) {
     CareportalEventType.EXERCISE       -> ElementType.EXERCISE
     CareportalEventType.QUESTION       -> ElementType.QUESTION
     CareportalEventType.ANNOUNCEMENT   -> ElementType.ANNOUNCEMENT
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun CareDialogScreenPreview() {
-    MaterialTheme {
-        CareDialogContent(
-            uiState = CareDialogUiState(
-                eventType = CareportalEventType.BGCHECK,
-                bgValue = 120.0,
-                glucoseUnits = GlucoseUnit.MGDL,
-                showNotesFromPreferences = true
-            ),
-            eventType = CareportalEventType.BGCHECK,
-            dateString = "25/02/2026",
-            timeString = "14:30",
-            onMeterTypeChange = {},
-            onBgValueChange = {},
-            onDurationChange = {},
-            onNotesChange = {},
-            onNavigateBack = {},
-            onConfirmClick = {},
-            onDateClick = {},
-            onTimeClick = {}
-        )
-    }
 }

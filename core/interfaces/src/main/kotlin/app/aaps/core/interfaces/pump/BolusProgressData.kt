@@ -39,9 +39,13 @@ class BolusProgressData @Inject constructor(
 
     /**
      * Called by CommandQueue before bolus delivery starts.
+     *
+     * Returns the generation token assigned to this bolus. Callers should keep it and pass it to the
+     * generation-scoped [clear] at the end of their command so a finished/cancelled bolus can never
+     * wipe the progress state of a NEWER bolus that has already started (see [clear]).
      */
-    fun start(insulin: Double, isSMB: Boolean, isPriming: Boolean = false) {
-        generation.incrementAndGet()
+    fun start(insulin: Double, isSMB: Boolean, isPriming: Boolean = false): Long {
+        val gen = generation.incrementAndGet()
         _state.value = BolusProgressState(
             insulin = insulin,
             isSMB = isSMB,
@@ -53,6 +57,7 @@ class BolusProgressData @Inject constructor(
             stopPressed = false,
             stopDeliveryEnabled = true
         )
+        return gen
     }
 
     /**
@@ -115,32 +120,63 @@ class BolusProgressData @Inject constructor(
     val isStopPressed: Boolean get() = _state.value?.stopPressed == true
 
     /**
-     * Called by CommandQueue when pump reports delivery complete.
+     * Unconditional completion — stamp percent=100 (UI success state) then auto-clear after [AUTO_CLEAR_DELAY_MS].
      *
-     * Sets percent to 100 so the UI shows the success state, then auto-clears after [delayMs]
-     * — but only if no newer bolus has started in the meantime (guarded by the generation
-     * counter). The clear runs on the application scope so it survives the queue worker
-     * finishing the current command.
+     * Use ONLY where frame ORDERING already guarantees no newer bolus can be displaced — the client progress
+     * mirror, whose relayed frames are timestamp-ordered. A per-command MASTER bolus MUST use the generation-scoped
+     * [completeAndAutoClear] overload instead (same rationale as [clear] vs [clear]).
      */
-    fun completeAndAutoClear(delayMs: Long = AUTO_CLEAR_DELAY_MS) {
-        // Also clear any stall flag: if the client recovered via a terminal Complete frame (no intervening
-        // Active frame to reset it), the success state must not keep showing the "connection lost" UI.
-        _state.update { it?.copy(percent = 100, stalled = false) }
-        val expectedGeneration = generation.get()
+    fun completeAndAutoClear() = completeAndAutoClear(generation.get())
+
+    /**
+     * Generation-scoped completion for a single master bolus command (mirror of [clear]). Guards BOTH the immediate
+     * percent=100 stamp AND the delayed null-clear against [expectedGeneration] (this command's [start] token): if a
+     * NEWER bolus has begun (generation bumped past the token), a finishing/older bolus can neither stamp completion
+     * onto NOR clear the newer bolus's progress state. The stamp also clears any stall flag (a terminal Complete with
+     * no intervening Active frame must not keep the "connection lost" UI). Check-and-mutate is atomic via [update].
+     */
+    fun completeAndAutoClear(expectedGeneration: Long) {
+        _state.update { current ->
+            if (current != null && generation.get() == expectedGeneration) current.copy(percent = 100, stalled = false) else current
+        }
         appScope.launch {
-            delay(delayMs)
-            if (generation.get() == expectedGeneration) {
-                _state.value = null
-            }
+            delay(AUTO_CLEAR_DELAY_MS)
+            if (generation.get() == expectedGeneration) _state.value = null
         }
     }
 
     /**
      * Called by CommandQueue to dismiss the UI.
      * Sets state to null — no bolus in progress.
+     *
+     * Unconditional: use only on genuine abort-everything paths (connection timeout, cancelAllBoluses,
+     * remote Cleared frame). A per-bolus command MUST use the generation-scoped [clear] overload instead.
      */
     fun clear() {
         _state.value = null
+    }
+
+    /**
+     * Generation-scoped clear for a single bolus command at the end of execute()/on cancel().
+     *
+     * Only nulls the state when [expectedGeneration] (the token returned by this command's [start]) is
+     * still the current generation. If a newer bolus has begun in the meantime, this is a no-op so the
+     * finishing/cancelled command cannot wipe the newer bolus's progress state.
+     *
+     * Why this matters: [start] is called at ENQUEUE time, so an SMB queued just before a manual bolus
+     * (while the pump is reconnecting) gets generation N and the manual bolus generation N+1 — both before
+     * either executes. The SMB then executes first and, without this guard, its terminal unconditional
+     * [clear] would null the state the still-pending manual bolus depends on. Every subsequent
+     * [updateProgress] frame would then be a no-op (state == null), so the driver's deliverTreatment reads
+     * delivered = 0 and raises a false BOLUS_DELIVERY_FAILED even though the pump delivered in full.
+     *
+     * [start] (enqueue thread, under the queue's lock) and this clear (queue-worker thread) can run
+     * concurrently, so the check-and-null is done atomically via [MutableStateFlow.update]: the generation
+     * is re-read inside the CAS loop, so a newer bolus's [start] that bumps the generation turns this into
+     * a no-op instead of wiping the state it just installed.
+     */
+    fun clear(expectedGeneration: Long) {
+        _state.update { current -> if (generation.get() == expectedGeneration) null else current }
     }
 
     /**

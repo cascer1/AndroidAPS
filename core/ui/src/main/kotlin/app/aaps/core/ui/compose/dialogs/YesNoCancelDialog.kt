@@ -3,7 +3,6 @@ package app.aaps.core.ui.compose.dialogs
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -12,7 +11,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.ui.R
 
@@ -24,6 +22,8 @@ import app.aaps.core.ui.R
  * @param onYes Called when Yes is clicked
  * @param onNo Called when No is clicked
  * @param onCancel Called when Cancel is clicked or dialog is dismissed
+ *
+ * @see YesNoCancelDialogPreview
  */
 @Composable
 fun YesNoCancelDialog(
@@ -104,18 +104,4 @@ fun YesNoCancelDialog(
         },
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun YesNoCancelDialogPreview() {
-    MaterialTheme {
-        YesNoCancelDialog(
-            title = "Save Changes",
-            message = "Do you want to save your changes?",
-            onYes = {},
-            onNo = {},
-            onCancel = {}
-        )
-    }
 }

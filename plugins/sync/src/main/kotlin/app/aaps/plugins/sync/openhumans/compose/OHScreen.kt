@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.AapsSpacing
@@ -67,8 +66,12 @@ internal fun OHScreen(
     )
 }
 
+/**
+ * @see OHScreenNotLoggedInPreview
+ * @see OHScreenLoggedInPreview
+ */
 @Composable
-private fun OHScreenContent(
+internal fun OHScreenContent(
     uiState: OHUiState,
     onSetup: () -> Unit,
     onLogout: () -> Unit,
@@ -141,31 +144,5 @@ private fun OHScreenContent(
                 Text(stringResource(R.string.logout))
             }
         }
-    }
-}
-
-@Preview(showBackground = true, name = "Not logged in")
-@Composable
-private fun OHScreenNotLoggedInPreview() {
-    MaterialTheme {
-        OHScreenContent(
-            uiState = OHUiState(isLoggedIn = false),
-            onSetup = {},
-            onLogout = {},
-            onUploadNow = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Logged in")
-@Composable
-private fun OHScreenLoggedInPreview() {
-    MaterialTheme {
-        OHScreenContent(
-            uiState = OHUiState(isLoggedIn = true, projectMemberId = "12345678"),
-            onSetup = {},
-            onLogout = {},
-            onUploadNow = {}
-        )
     }
 }

@@ -14,7 +14,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.ui.R
 
@@ -26,6 +25,8 @@ import app.aaps.core.ui.R
  * @param positiveButton Optional text for positive button (if null, only dismiss is shown)
  * @param onPositive Called when positive button is clicked
  * @param onDismiss Called when dismiss is clicked or dialog is dismissed
+ *
+ * @see ErrorDialogPreview
  */
 @Composable
 fun ErrorDialog(
@@ -122,18 +123,4 @@ fun ErrorDialog(
         },
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ErrorDialogPreview() {
-    MaterialTheme {
-        ErrorDialog(
-            title = "Error",
-            message = "Something went wrong.\nPlease try again.",
-            positiveButton = "Retry",
-            onPositive = {},
-            onDismiss = {}
-        )
-    }
 }

@@ -22,7 +22,6 @@ import app.aaps.core.graph.BasalProfileGraphCompose
 import app.aaps.core.graph.IcProfileGraphCompose
 import app.aaps.core.graph.IsfProfileGraphCompose
 import app.aaps.core.graph.TargetBgProfileGraphCompose
-import androidx.compose.ui.tooling.preview.Preview
 import app.aaps.core.interfaces.insulin.ConcentrationType
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.ui.R
@@ -72,7 +71,7 @@ fun ProfileSingleContent(
                 Column(modifier = Modifier.padding(16.dp)) {
                     ProfileRow(
                         label = stringResource(R.string.units_label),
-                        value = profile.units.asText
+                        value = profile.units.displayLabel
                     )
                 }
             }
@@ -422,6 +421,9 @@ fun ProfileCompareContent(
     }
 }
 
+/**
+ * @see ProfileRowPreview
+ */
 @Composable
 fun ProfileInlineRow(label: String, value: String) {
     Row(
@@ -511,18 +513,6 @@ fun ProfileRow(label: String, value: String, showColon: Boolean = true) {
                     )
                 }
             }
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileRowPreview() {
-    MaterialTheme {
-        Column {
-            ProfileRow(label = "Units", value = "mg/dL")
-            ProfileRow(label = "IC", value = "08:00 10.0\n12:00 8.5\n18:00 9.0")
-            ProfileInlineRow(label = "Insulin", value = "Humalog")
         }
     }
 }

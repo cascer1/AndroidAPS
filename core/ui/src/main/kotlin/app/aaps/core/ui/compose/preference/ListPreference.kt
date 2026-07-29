@@ -48,7 +48,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 enum class ListPreferenceType {
@@ -56,6 +55,9 @@ enum class ListPreferenceType {
     DROPDOWN_MENU,
 }
 
+/**
+ * @see ListPreferencePreview
+ */
 @Composable
 fun <T> ListPreference(
     state: MutableState<T>,
@@ -178,20 +180,6 @@ fun <T> ListPreference(
         summary = summary,
     ) {
         openSelector = true
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ListPreferencePreview() {
-    PreviewTheme {
-        ListPreference(
-            value = "Option B",
-            onValueChange = {},
-            values = listOf("Option A", "Option B", "Option C"),
-            title = { Text("Choose option") },
-            summary = { Text("Option B") }
-        )
     }
 }
 

@@ -1,18 +1,11 @@
 package app.aaps.core.ui.compose.icons
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
@@ -21,6 +14,8 @@ import androidx.compose.ui.unit.dp
  *
  * Single-color design — works correctly with Compose tint.
  * Based on Material "Settings" outlined (24dp viewport).
+ *
+ * @see IcSettingsOffPreview
  */
 val IcSettingsOff: ImageVector by lazy {
     ImageVector.Builder(
@@ -94,18 +89,4 @@ val IcSettingsOff: ImageVector by lazy {
             lineTo(20.5f, 4.5f)
         }
     }.build()
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun IcSettingsOffPreview() {
-    MaterialTheme {
-        Icon(
-            imageVector = IcSettingsOff,
-            contentDescription = null,
-            modifier = Modifier
-                .padding(8.dp)
-                .size(48.dp)
-        )
-    }
 }

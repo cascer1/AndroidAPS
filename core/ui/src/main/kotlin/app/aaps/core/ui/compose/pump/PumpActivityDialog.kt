@@ -27,12 +27,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.interfaces.pump.BolusProgressState
-import app.aaps.core.interfaces.pump.PumpInsulin
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
 
@@ -90,8 +88,16 @@ fun PumpActivityDialog(
     }
 }
 
+/**
+ * @see PreviewBolusInProgress
+ * @see PreviewBolusStopPressed
+ * @see PreviewBolusCompleted
+ * @see PreviewBolusIndeterminate
+ * @see PreviewBolusStalled
+ * @see PreviewPumpStatusOnly
+ */
 @Composable
-private fun PumpActivityCard(
+internal fun PumpActivityCard(
     bolusState: BolusProgressState?,
     pumpStatus: String,
     queueStatus: String?,
@@ -206,7 +212,7 @@ private fun BolusProgressSection(
         // Stalled (client/follower only — never set for a local bolus): the progress stream stopped
         // before a terminal frame. Stop can't reach the master either, so offer a manual dismiss that
         // only hides this dialog — it does NOT stop the pump.
-        state.stalled  -> {
+        state.stalled -> {
             Text(
                 text = stringResource(R.string.clientcontrol_bolus_progress_stalled_title),
                 style = MaterialTheme.typography.titleSmall,
@@ -261,139 +267,3 @@ private fun BolusProgressSection(
 }
 
 // --- Previews ---
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewBolusInProgress() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = BolusProgressState(
-                insulin = 4.0,
-                isSMB = false,
-                isPriming = false,
-                percent = 45,
-                status = "Delivering 1.80U",
-                wearStatus = "Delivering 1.80U",
-                delivered = PumpInsulin(1.8),
-                stopPressed = false,
-                stopDeliveryEnabled = true
-            ),
-            pumpStatus = "Connected",
-            queueStatus = null,
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewBolusStopPressed() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = BolusProgressState(
-                insulin = 4.0,
-                isSMB = false,
-                isPriming = false,
-                percent = 45,
-                status = "Delivering 1.80U",
-                wearStatus = "Delivering 1.80U",
-                delivered = PumpInsulin(1.8),
-                stopPressed = true,
-                stopDeliveryEnabled = true
-            ),
-            pumpStatus = "",
-            queueStatus = null,
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewBolusCompleted() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = BolusProgressState(
-                insulin = 4.0,
-                isSMB = false,
-                isPriming = false,
-                percent = 100,
-                status = "Bolus 4.00U delivered successfully",
-                wearStatus = "Bolus 4.00U delivered successfully",
-                delivered = PumpInsulin(4.0),
-                stopPressed = false,
-                stopDeliveryEnabled = true
-            ),
-            pumpStatus = "",
-            queueStatus = null,
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewBolusIndeterminate() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = BolusProgressState(
-                insulin = 2.5,
-                isSMB = false,
-                isPriming = false,
-                percent = 0,
-                status = "",
-                wearStatus = "",
-                delivered = PumpInsulin(0.0),
-                stopPressed = false,
-                stopDeliveryEnabled = false
-            ),
-            pumpStatus = "Connecting for 5s",
-            queueStatus = "BOLUS 2.50U",
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewBolusStalled() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = BolusProgressState(
-                insulin = 1.6,
-                isSMB = false,
-                isPriming = false,
-                percent = 85,
-                status = "Delivering 1.36U",
-                wearStatus = "Delivering 1.36U",
-                delivered = PumpInsulin(1.36),
-                stopPressed = false,
-                stopDeliveryEnabled = true,
-                stalled = true
-            ),
-            pumpStatus = "",
-            queueStatus = null,
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewPumpStatusOnly() {
-    MaterialTheme {
-        PumpActivityCard(
-            bolusState = null,
-            pumpStatus = "Handshaking",
-            queueStatus = "READSTATUS",
-            onStop = {},
-            onDismiss = {}
-        )
-    }
-}
-

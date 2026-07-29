@@ -8,17 +8,17 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.tooling.preview.Preview
-import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.IntPreferenceKey
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.StringPreferenceKey
+import app.aaps.core.keys.interfaces.VisibilityContext
 
 /**
  * Composable list int preference for use inside card sections.
  *
  * @param titleResId Optional title resource ID. If 0 or not provided, uses intKey.titleResId
  * @param visibilityContext Optional context for evaluating runtime visibility/enabled conditions
+ *
+ * @see AdaptiveListIntPreferencePreview
  */
 @Composable
 fun AdaptiveListIntPreferenceItem(
@@ -26,7 +26,7 @@ fun AdaptiveListIntPreferenceItem(
     titleResId: Int = 0,
     entries: List<String>,
     entryValues: List<Int>,
-    visibilityContext: PreferenceVisibilityContext? = null
+    visibilityContext: VisibilityContext? = null
 ) {
     val effectiveTitleResId = if (titleResId != 0) titleResId else intKey.titleResId
 
@@ -75,7 +75,7 @@ fun AdaptiveStringListPreferenceItem(
     stringKey: StringPreferenceKey,
     titleResId: Int = 0,
     entries: Map<String, String>,
-    visibilityContext: PreferenceVisibilityContext? = null
+    visibilityContext: VisibilityContext? = null
 ) {
     val effectiveTitleResId = if (titleResId != 0) titleResId else stringKey.titleResId
 
@@ -109,16 +109,4 @@ fun AdaptiveStringListPreferenceItem(
             AnnotatedString(entries[value] ?: value)
         }
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AdaptiveListIntPreferencePreview() {
-    PreviewTheme {
-        AdaptiveListIntPreferenceItem(
-            intKey = IntKey.OverviewCarbsButtonIncrement1,
-            entries = listOf("5g", "10g", "15g", "20g"),
-            entryValues = listOf(5, 10, 15, 20)
-        )
-    }
 }

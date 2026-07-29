@@ -12,7 +12,6 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.notifications.NotificationManager
@@ -83,7 +82,6 @@ open class TestBaseWithProfile : TestBase() {
     @Mock lateinit var theme: Resources.Theme
     @Mock lateinit var typedArray: TypedArray
     @Mock lateinit var profileRepository: ProfileRepository
-    @Mock lateinit var insulin: Insulin
     @Mock lateinit var ch: ConcentrationHelper
 
     lateinit var dateUtil: DateUtil
@@ -149,7 +147,10 @@ open class TestBaseWithProfile : TestBase() {
         whenever(context.obtainStyledAttributes(anyOrNull(), any(), any(), any())).thenReturn(typedArray)
         whenever(dateUtil.now()).thenReturn(now)
         whenever(activePlugin.activePump).thenReturn(testPumpPlugin)
-        whenever(insulin.iCfg).thenReturn(someICfg)
+        // Synchronous mirror of the running profile's insulin. Non-null by default so the many non-suspend
+        // readers (concentration conversions) behave as if a profile is running; stub it to a StateFlow of
+        // null in a test that needs the "nothing in force" path.
+        whenever(profileFunction.runningICfg).thenReturn(MutableStateFlow(someICfg))
         whenever(preferences.get(StringKey.GeneralUnits)).thenReturn(GlucoseUnit.MGDL.asText)
         whenever(preferences.observe(any<BooleanNonPreferenceKey>())).thenReturn(MutableStateFlow(false))
         whenever(preferences.observe(any<StringNonPreferenceKey>())).thenReturn(MutableStateFlow(""))
@@ -202,6 +203,16 @@ open class TestBaseWithProfile : TestBase() {
         whenever(ch.bolusProgressString(any<PumpInsulin>(), any<Boolean>())).thenReturn("")
         whenever(ch.bolusProgressString(any<PumpInsulin>(), any<Double>(), any<Boolean>())).thenReturn("")
         whenever(ch.fromPump(any<PumpInsulin>(), any<Boolean>())).thenAnswer { it.getArgument<PumpInsulin>(0).cU }
+        whenever(ch.fromPump(any<PumpRate>())).thenAnswer { it.getArgument<PumpRate>(0).cU }
+        // Default U100 (concentration 1.0): IU<->cU conversions are identity so constraint/pump tests keep their
+        // real-value expectations. ConstraintsChecker folds pump cU caps via toPump/fromPump; SafetyPlugin asks
+        // for the (concentration-adjusted) bolus step via bolusStep (delegated to the active pump's native step).
+        whenever(ch.concentration).thenReturn(1.0)
+        whenever(ch.toPump(any<Double>())).thenAnswer { PumpInsulin(it.getArgument<Double>(0)) }
+        whenever(ch.toPumpRate(any<Double>())).thenAnswer { PumpRate(it.getArgument<Double>(0)) }
+        // Deliverable IU step: delegate to the active pump's configured bolusStep (U100 identity; tests that
+        // need a specific step set testPumpPlugin.pumpDescription.bolusStep). Real impl is amount-aware (Insight).
+        whenever(ch.bolusStep(any<Double>())).thenAnswer { activePlugin.activePump.pumpDescription.bolusStep }
 
         doAnswer { invocation: InvocationOnMock ->
             val string = invocation.getArgument<Int>(0)

@@ -17,7 +17,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.AapsSpacing
@@ -25,6 +24,9 @@ import app.aaps.core.ui.compose.pump.WizardStepLayout
 import app.aaps.ui.compose.scenes.SceneIcons
 import app.aaps.ui.compose.scenes.SceneTemplate
 
+/**
+ * @see TemplatePickerStepPreview
+ */
 @Composable
 internal fun TemplatePickerStep(onSelect: (SceneTemplate) -> Unit) {
     WizardStepLayout {
@@ -74,13 +76,5 @@ internal fun TemplatePickerStep(onSelect: (SceneTemplate) -> Unit) {
                 }
             }
         }
-    }
-}
-
-@Preview(showBackground = true, showSystemUi = true)
-@Composable
-private fun TemplatePickerStepPreview() {
-    MaterialTheme {
-        TemplatePickerStep(onSelect = {})
     }
 }

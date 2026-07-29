@@ -99,6 +99,26 @@
       `mutableListOf<ImageVector>()`
     - Only exception: when two different classes with the same simple name would collide — then one
       can stay fully qualified at use site (rare)
+- **KDoc `[symbol]` references must resolve, or use backticks:** The IDE lint
+  (`KDocUnresolvedReference`) flags any `[Xxx]` link in a `/** */` block that can't be resolved from
+  the current file. A `[Xxx]` link only resolves if `Xxx` is importable here — imported, in the same
+  package, or written as a fully-qualified name whose module is on **this** module's main classpath.
+  When touching a file that has such a warning, fix it (don't mass-fix untouched files):
+    - **Prefer a clickable link.** If a resolvable symbol exists, link it — use an **interface** in a
+      `core:interfaces` (or similar already-depended-on) module rather than a concrete impl in another
+      module. A fully-qualified link is fine when the short name isn't imported:
+      `[app.aaps.core.interfaces.aps.Loop.invoke]`.
+    - **NEVER add a module dependency just to make a doc link resolve.** If the only matching symbol
+      is `private`, or lives in a module this one doesn't depend on (or only as `testImplementation`),
+      it can't be linked.
+    - **Then fall back to backticks.** Wrap the unresolvable reference in backticks so it's a plain
+      code span, not a checked link — lint has nothing to resolve, and it still renders as monospace:
+      `` `LoopPlugin.applySMBRequest` ``.
+    - Do NOT use `@Suppress("KDocUnresolvedReference")` — it's unreliable on the enclosing
+      declaration and hides real breakage of any *other* link in the same doc block. Backticks are the
+      fix.
+    - ❌ BAD: `* handled in [LoopPlugin.applySMBRequest].` (private, cross-module → unresolved)
+    - ✅ GOOD: `` * handled in [app.aaps.core.interfaces.aps.Loop.invoke] and `LoopPlugin.applySMBRequest`. ``
 - **Use centralized theme/styling:**
     - For Compose UI: Always use theme values instead of hardcoded dp/padding/colors. If proper
       setting doesn't exist, discuss it before creating hardcoded values.
@@ -155,11 +175,15 @@
       `ProfileUtil.fromMgdlToStringWithUnits`) over a bare number. Most such templates already exist
       in
       `:core:ui`; reuse them before adding a new one.
-- **Add translator context to every new string via the `comment="..."` attribute** (not an XML
-  comment).
-  Explain each placeholder and give an example, mirroring existing strings:
-    - ✅
+- **Add a `comment="..."` translator note ONLY when a new string genuinely needs it for correct
+  translation** — i.e. it has placeholders, is short/ambiguous out of context, carries units, or has
+  order-sensitive parts. Do NOT add comments blanket to every string; a plain, self-explanatory
+  sentence needs none. When you do add one, use the `comment="..."` attribute (not an XML comment) and
+  explain each placeholder with an example, mirroring existing strings:
+    - ✅ needs it (placeholders + units):
       `<string name="preference_range_summary" comment="%1$s=current value, %2$s=unit label, %3$s=min, %4$s=max. Example: 5.0 U (0.0 – 10.0)">%1$s%2$s (%3$s – %4$s)</string>`
+    - ❌ does NOT need it (plain, unambiguous sentence — no comment):
+      `<string name="master_control_disabled_banner">Master has disabled remote control. Editing is disabled until it is re-enabled on the master.</string>`
 - **In Compose code, use `stringResource()` not `ResourceHelper`** - Compose has built-in
   `stringResource(R.string.xyz)` function. Only use `ResourceHelper` (rh) in non-Composable contexts
   (ViewModels, regular functions). This keeps Compose code cleaner and more idiomatic.

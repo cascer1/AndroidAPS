@@ -1,6 +1,5 @@
 package app.aaps.plugins.sync.xdrip.compose
 
-import android.content.res.Configuration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,7 +34,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.ui.compose.AapsSpacing
@@ -100,8 +98,12 @@ internal fun XdripScreen(
     )
 }
 
+/**
+ * @see XdripScreenPreview
+ * @see XdripScreenEmptyPreview
+ */
 @Composable
-private fun XdripScreenContent(
+internal fun XdripScreenContent(
     uiState: XdripUiState,
     dateUtil: DateUtil? = null,
     modifier: Modifier = Modifier
@@ -205,36 +207,5 @@ private fun XdripMenu(
                 }
             )
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
-@Composable
-private fun XdripScreenPreview() {
-    MaterialTheme {
-        XdripScreenContent(
-            uiState = XdripUiState(
-                queue = "3",
-                logList = listOf(
-                    XdripLog(action = "BG", logText = "Sending glucose value 5.5"),
-                    XdripLog(action = "TREATMENT", logText = "Sending bolus 1.5U"),
-                    XdripLog(action = "STATUS", logText = "Loop running, IOB 2.3U"),
-                )
-            )
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun XdripScreenEmptyPreview() {
-    MaterialTheme {
-        XdripScreenContent(
-            uiState = XdripUiState(
-                queue = "0",
-                logList = emptyList()
-            )
-        )
     }
 }

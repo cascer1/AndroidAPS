@@ -124,10 +124,16 @@ sealed class EventData : Event() {
     data class ActionScenePreCheck(val id: String, val title: String) : EventData()
 
     @Serializable
-    data class ActionSceneConfirmed(val id: String, val title: String) : EventData()
+    data class ActionSceneConfirmed(val id: String, val title: String, val bolusId: Long? = null) : EventData()
 
     @Serializable
     class ActionSceneStop : EventData()
+
+    @Serializable
+    class ActionSceneStopPreCheck : EventData()
+
+    @Serializable
+    class ActionSceneStopConfirmed : EventData()
 
     @Serializable
     data class ActiveSceneState(val active: Boolean) : EventData()
@@ -190,7 +196,7 @@ sealed class EventData : Event() {
     /** Wear ✓ on a wizard / quick-wizard bolus → the master's parked, consume-once bolusId ([timeStamp] is the
      *  opaque id field, == the master `wizard.timeStamp`; the wear caller echoes the id `prepareWizard`/`prepareQuickWizard` returned). */
     @Serializable
-    data class ActionWizardConfirmed(val timeStamp: Long) : EventData()
+    data class ActionWizardConfirmed(val timeStamp: Long, val correctionU: Double = 0.0) : EventData()
 
     @Serializable
     data class ActionTempTargetConfirmed(val bolusId: Long) : EventData()
@@ -452,6 +458,40 @@ sealed class EventData : Event() {
     @Serializable
     data class ConfirmActionLine(val role: String, val text: String)
 
+    /**
+     * Raw bolus-wizard calculation breakdown sent alongside [ConfirmAction] for wizard/quick-wizard boluses.
+     * The watch renders a dedicated "Calculations" page so the user can inspect the full dose breakdown before
+     * confirming. Absent (null) for non-wizard actions (TT, PS, RM, scene, batch-only bolus/carbs).
+     * All insulin values are in the user's units (U); [sens] and [ic] are in profile units.
+     */
+    @Serializable
+    data class WizardDetail(
+        val totalInsulin: Double,
+        val unclampedInsulin: Double = totalInsulin,
+        val carbs: Int,
+        val insulinFromBG: Double,
+        val insulinFromTrend: Double,
+        val insulinFromCOB: Double,
+        val insulinFromCarbs: Double,
+        val insulinFromBolusIOB: Double,
+        val insulinFromBasalIOB: Double,
+        val includeBolusIOB: Boolean,
+        val includeBasalIOB: Boolean,
+        val percentageCorrection: Int,
+        val cob: Double,
+        /** Formatted TT target string in profile units (e.g. "5.5" or "5.0-5.5"), null when no TT was used. */
+        val tempTargetLabel: String?,
+        val ic: Double,
+        val sens: Double,
+        val eCarbsGrams: Int = 0,
+        val eCarbsDelayMinutes: Int = 0,
+        val eCarbsDurationHours: Int = 0,
+        val carbTimeMinutes: Int = 0,
+        val alarm: Boolean = false,
+        val maxBolus: Double = 0.0,
+        val bolusStep: Double = 0.0,
+    )
+
     @Serializable // returnCommand is sent back to Mobile after confirmation
     data class ConfirmAction(
         val title: String,
@@ -467,6 +507,9 @@ sealed class EventData : Event() {
         // locally, no relay) → the watch shows success immediately as before. Set from config.AAPSCLIENT, so it is
         // role-based, not per-action.
         val deferConfirm: Boolean = false,
+        // Optional wizard calculation breakdown: populated for bolus-wizard and quick-wizard prepares, null for all
+        // other actions. The watch shows an extra "Calculations" page before the confirm page when present.
+        val wizardDetail: WizardDetail? = null,
     ) : EventData()
 
     /**

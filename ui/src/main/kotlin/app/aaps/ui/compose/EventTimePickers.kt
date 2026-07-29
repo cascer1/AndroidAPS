@@ -1,8 +1,6 @@
 package app.aaps.ui.compose
 
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.tooling.preview.Preview
-import app.aaps.core.ui.compose.AapsTheme
 import app.aaps.core.ui.compose.dialogs.DatePickerModal
 import app.aaps.core.ui.compose.dialogs.TimePickerModal
 import kotlinx.datetime.LocalDateTime
@@ -18,6 +16,8 @@ import kotlin.time.Instant
  *
  * Handles DST gaps: if the merged LocalDateTime falls in a DST gap,
  * [toInstant] adjusts automatically (kotlinx.datetime shifts to the valid offset).
+ *
+ * @see EventDatePickerPreview
  */
 @Composable
 fun EventDatePicker(
@@ -45,6 +45,8 @@ fun EventDatePicker(
  * then calls [onEventTimeChanged] with the resulting epoch millis.
  *
  * Handles DST gaps: same as [EventDatePicker].
+ *
+ * @see EventTimePickerPreview
  */
 @Composable
 fun EventTimePicker(
@@ -64,28 +66,4 @@ fun EventTimePicker(
         initialMinute = currentLdt.minute,
         is24Hour = true
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun EventDatePickerPreview() {
-    AapsTheme {
-        EventDatePicker(
-            eventTimeMillis = System.currentTimeMillis(),
-            onEventTimeChanged = {},
-            onDismiss = {}
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun EventTimePickerPreview() {
-    AapsTheme {
-        EventTimePicker(
-            eventTimeMillis = System.currentTimeMillis(),
-            onEventTimeChanged = {},
-            onDismiss = {}
-        )
-    }
 }

@@ -6,6 +6,7 @@ import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.ClientControlActionDispatcher
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.clientcontrol.PendingAction
+import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -24,6 +25,7 @@ import app.aaps.core.nssdk.localmodel.clientcontrol.AckStatus
 import app.aaps.core.nssdk.localmodel.clientcontrol.BolusPreview
 import app.aaps.core.nssdk.localmodel.clientcontrol.ClientControlMessage
 import app.aaps.core.nssdk.localmodel.clientcontrol.PrefEntry
+import app.aaps.core.nssdk.localmodel.clientcontrol.WizardDetailDto
 import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressEnvelope
 import app.aaps.core.nssdk.localmodel.clientcontrol.ProgressPhase
 import app.aaps.core.nssdk.utils.ClientControlCrypto
@@ -329,7 +331,7 @@ class ClientControlRoundTrip @Inject constructor(
                 is ClientControlActionDispatcher.Command.SceneCommit    -> ClientControlMessage.SceneCommit(command.bolusId)
                 is ClientControlActionDispatcher.Command.SceneStop      -> ClientControlMessage.SceneStop(command.triggerChain)
                 is ClientControlActionDispatcher.Command.BolusPrepare   -> ClientControlMessage.BolusPrepare(command.guid)
-                is ClientControlActionDispatcher.Command.BolusCommit    -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor)
+                is ClientControlActionDispatcher.Command.BolusCommit    -> ClientControlMessage.BolusCommit(command.bolusId, command.asAdvisor, command.correctionU)
                 is ClientControlActionDispatcher.Command.WizardPrepare  -> with(command.inputs) {
                     ClientControlMessage.WizardPrepare(bg, carbs, percentage, directCorrection, carbTime, useBg, useCob, useIob, useTt, useTrend, alarm, notes, eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours, profileName)
                 }
@@ -406,7 +408,8 @@ class ClientControlRoundTrip @Inject constructor(
             id = preview.bolusId,
             lines = preview.lines.map { ConfirmationLine(roleOf(it.role), it.text) },
             advisorApplies = preview.advisorApplies,
-            advisorLines = preview.advisorLines.map { ConfirmationLine(roleOf(it.role), it.text) }
+            advisorLines = preview.advisorLines.map { ConfirmationLine(roleOf(it.role), it.text) },
+            wizardDetail = preview.wizardDetail?.toDomain(),
         )
     }
 
@@ -430,3 +433,29 @@ class ClientControlRoundTrip @Inject constructor(
         return doneOutcome(ack)
     }
 }
+
+private fun WizardDetailDto.toDomain() = EventData.WizardDetail(
+    totalInsulin = totalInsulin,
+    unclampedInsulin = unclampedInsulin,
+    carbs = carbs,
+    insulinFromBG = insulinFromBG,
+    insulinFromTrend = insulinFromTrend,
+    insulinFromCOB = insulinFromCOB,
+    insulinFromCarbs = insulinFromCarbs,
+    insulinFromBolusIOB = insulinFromBolusIOB,
+    insulinFromBasalIOB = insulinFromBasalIOB,
+    includeBolusIOB = includeBolusIOB,
+    includeBasalIOB = includeBasalIOB,
+    percentageCorrection = percentageCorrection,
+    cob = cob,
+    tempTargetLabel = tempTargetLabel,
+    ic = ic,
+    sens = sens,
+    eCarbsGrams = eCarbsGrams,
+    eCarbsDelayMinutes = eCarbsDelayMinutes,
+    eCarbsDurationHours = eCarbsDurationHours,
+    carbTimeMinutes = carbTimeMinutes,
+    alarm = alarm,
+    maxBolus = maxBolus,
+    bolusStep = bolusStep,
+)

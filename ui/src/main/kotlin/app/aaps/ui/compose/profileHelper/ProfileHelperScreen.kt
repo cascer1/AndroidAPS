@@ -48,20 +48,20 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.graph.profile.ProfileCompareContent
 import app.aaps.core.graph.profile.buildBasalRows
 import app.aaps.core.graph.profile.buildIcRows
 import app.aaps.core.graph.profile.buildIsfRows
 import app.aaps.core.graph.profile.buildTargetRows
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.objects.profile.ProfileSealed
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.NumberInputRow
 import app.aaps.core.ui.compose.bottomBarSafeArea
 import app.aaps.core.ui.compose.clearFocusOnTap
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.labelResId
 import app.aaps.ui.R
 import app.aaps.ui.compose.profileManagement.viewmodels.ProfileHelperViewModel
@@ -170,11 +170,11 @@ fun ProfileHelperScreen(
                     icsRows = buildIcRows(sealed1, sealed2, viewModel.dateUtil),
                     icUnits = viewModel.rh.gs(app.aaps.core.ui.R.string.profile_carbs_per_unit),
                     isfsRows = buildIsfRows(sealed1, sealed2, viewModel.profileUtil, viewModel.dateUtil),
-                    isfUnits = "${viewModel.getUnits().asText} ${viewModel.rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
+                    isfUnits = viewModel.rh.gs(if (viewModel.getUnits() == GlucoseUnit.MGDL) app.aaps.core.ui.R.string.profile_isf_units_mgdl else app.aaps.core.ui.R.string.profile_isf_units_mmol),
                     basalsRows = buildBasalRows(sealed1, sealed2, viewModel.dateUtil),
                     basalUnits = viewModel.rh.gs(app.aaps.core.ui.R.string.profile_ins_units_per_hour),
                     targetsRows = buildTargetRows(sealed1, sealed2, viewModel.dateUtil, viewModel.profileUtil),
-                    targetUnits = viewModel.getUnits().asText,
+                    targetUnits = viewModel.getUnits().displayLabel,
                     profileName1 = name0,
                     profileName2 = name1
                 )
@@ -293,9 +293,12 @@ fun ProfileHelperScreen(
     )
 }
 
+/**
+ * @see ProfileHelperCurrentPreview
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun ProfileHelperContent(
+internal fun ProfileHelperContent(
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
     profileTypes: List<ProfileType>,
@@ -464,6 +467,10 @@ fun getProfileTypeDisplayName(type: ProfileType): String {
     }
 }
 
+/**
+ * @see ProfileHelperMotolPreview
+ * @see DefaultProfileContentPreview
+ */
 @Composable
 fun DefaultProfileContent(
     age: Int, onAgeChange: (Int) -> Unit,
@@ -510,6 +517,9 @@ fun DefaultProfileContent(
     }
 }
 
+/**
+ * @see AvailableProfileContentPreview
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AvailableProfileContent(profiles: List<String>, selectedIndex: Int, onProfileSelected: (Int) -> Unit, modifier: Modifier = Modifier) {
@@ -536,6 +546,9 @@ fun AvailableProfileContent(profiles: List<String>, selectedIndex: Int, onProfil
     }
 }
 
+/**
+ * @see ProfileSwitchContentPreview
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileSwitchContent(profileSwitches: List<String>, selectedIndex: Int, onProfileSwitchSelected: (Int) -> Unit, modifier: Modifier = Modifier) {
@@ -559,128 +572,5 @@ fun ProfileSwitchContent(profileSwitches: List<String>, selectedIndex: Int, onPr
                 }
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileHelperMotolPreview() {
-    val focusManager = LocalFocusManager.current
-    MaterialTheme {
-        ProfileHelperContent(
-            selectedTab = 0,
-            onTabSelected = {},
-            profileTypes = listOf(ProfileType.MOTOL_DEFAULT, ProfileType.CURRENT),
-            onProfileTypeChange = { _, _ -> },
-            isCompareTabValid = false,
-            showCloneAction = false,
-            onCloneClick = {},
-            onBackClick = {},
-            focusManager = focusManager,
-            comparisonContent = {},
-            profileTabContent = {
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-                ) {
-                    DefaultProfileContent(
-                        age = 15,
-                        onAgeChange = {},
-                        weight = 0.0,
-                        onWeightChange = {},
-                        tdd = 25.0,
-                        onTddChange = {},
-                        pct = 32.0,
-                        onPctChange = {},
-                        showPct = false,
-                        showWeight = false,
-                        showTdd = true,
-                        modifier = Modifier.padding(16.dp)
-                    )
-                }
-            }
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileHelperCurrentPreview() {
-    val focusManager = LocalFocusManager.current
-    MaterialTheme {
-        ProfileHelperContent(
-            selectedTab = 1,
-            onTabSelected = {},
-            profileTypes = listOf(ProfileType.MOTOL_DEFAULT, ProfileType.CURRENT),
-            onProfileTypeChange = { _, _ -> },
-            isCompareTabValid = true,
-            showCloneAction = true,
-            onCloneClick = {},
-            onBackClick = {},
-            focusManager = focusManager,
-            comparisonContent = {},
-            profileTabContent = {
-                ElevatedCard(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Active Profile", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 8.dp))
-                        Text("Profile 1", style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun DefaultProfileContentPreview() {
-    MaterialTheme {
-        DefaultProfileContent(
-            age = 15,
-            onAgeChange = {},
-            weight = 0.0,
-            onWeightChange = {},
-            tdd = 25.0,
-            onTddChange = {},
-            pct = 32.0,
-            onPctChange = {},
-            showPct = true,
-            showWeight = false,
-            showTdd = true,
-            modifier = Modifier.padding(16.dp)
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AvailableProfileContentPreview() {
-    MaterialTheme {
-        AvailableProfileContent(
-            profiles = listOf("Profile 1", "Profile 2", "Tight control"),
-            selectedIndex = 0,
-            onProfileSelected = {},
-            modifier = Modifier.padding(16.dp)
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileSwitchContentPreview() {
-    MaterialTheme {
-        ProfileSwitchContent(
-            profileSwitches = listOf("Profile 1 (100%)", "Profile 2 (80%)"),
-            selectedIndex = 0,
-            onProfileSwitchSelected = {},
-            modifier = Modifier.padding(16.dp)
-        )
     }
 }

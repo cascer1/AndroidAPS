@@ -8,7 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.dialogs.ElementConfirmationDialog
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 
 /**
@@ -57,6 +57,8 @@ fun ManageSheetHost(
             showFill = manageState.showFill,
             showAuthorizedClients = manageState.showAuthorizedClients,
             showPairWithMaster = manageState.showPairWithMaster,
+            showMutatingActions = manageState.showMutatingActions,
+            showPump = manageState.showPump,
             cancelTempBasalText = manageState.cancelTempBasalText,
             cancelExtendedBolusText = manageState.cancelExtendedBolusText,
             isPatchPump = manageState.isPatchPump,

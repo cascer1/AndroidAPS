@@ -1,15 +1,11 @@
 package app.aaps.core.ui.compose
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
@@ -20,6 +16,8 @@ import androidx.compose.ui.unit.dp
  * @param onClick Called when the FAB is clicked
  * @param modifier Modifier to be applied to the FAB
  * @param content The content of the FAB (typically an Icon)
+ *
+ * @see AapsFabPreview
  */
 @Composable
 fun AapsFab(
@@ -50,6 +48,8 @@ fun AapsFab(
  * @param onClick Called when the FAB is clicked
  * @param modifier Modifier to be applied to the FAB
  * @param content The content of the FAB (typically an Icon)
+ *
+ * @see AapsSmallFabPreview
  */
 @Composable
 fun AapsSmallFab(
@@ -70,24 +70,4 @@ fun AapsSmallFab(
         ),
         content = content
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AapsFabPreview() {
-    AapsTheme {
-        AapsFab(onClick = {}) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = null)
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AapsSmallFabPreview() {
-    AapsTheme {
-        AapsSmallFab(onClick = {}) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = null)
-        }
-    }
 }

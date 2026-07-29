@@ -5,6 +5,7 @@ import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.data.ui.ConfirmationLine
+import app.aaps.core.interfaces.rx.weardata.EventData
 
 /**
  * Transport-neutral spine for wizard / quick-wizard bolus **prepare → confirm → deliver**. Owns the
@@ -64,7 +65,7 @@ interface WizardBolusExecutor {
      * executor's URGENT alarm, NOT via [onError]. [asAdvisor] delivers the correction-only advisor bolus (high-BG "eat
      * later" branch) instead of the carb wizard bolus.
      */
-    suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean = false): ConfirmResult
+    suspend fun confirm(bolusId: Long, source: Sources, onError: (String) -> Unit, asAdvisor: Boolean = false, correctionU: Double = 0.0): ConfirmResult
 
     /**
      * Canonical wizard / quick-wizard bolus — a type-specific entry point taking exactly the wizard
@@ -172,10 +173,18 @@ interface WizardBolusExecutor {
             val bolusId: Long,
             val lines: List<ConfirmationLine> = emptyList(),
             val advisorApplies: Boolean = false,
-            val advisorLines: List<ConfirmationLine> = emptyList()
+            val advisorLines: List<ConfirmationLine> = emptyList(),
+            val wizardDetail: EventData.WizardDetail? = null,
         ) : PrepareResult
 
         data class Error(val message: String) : PrepareResult
+
+        /**
+         * The prepare resolved to a no-op: nothing to do after caps/clamps (e.g. negative carbs entered with no COB
+         * to remove, a back-dated COB removal, or an empty batch). This is NOT a delivery error — the caller should
+         * surface it as the neutral "no action selected" message, never the bolus-error alarm/title.
+         */
+        data object NoAction : PrepareResult
     }
 
     sealed interface ConfirmResult {
@@ -211,6 +220,7 @@ interface WizardBolusExecutor {
         val eCarbsGrams: Int = 0,
         val eCarbsDelayMinutes: Int = 0,
         val eCarbsDurationHours: Int = 0,
-        val profileName: String? = null
+        val profileName: String? = null,
+        val source: Sources = Sources.WizardDialog
     )
 }

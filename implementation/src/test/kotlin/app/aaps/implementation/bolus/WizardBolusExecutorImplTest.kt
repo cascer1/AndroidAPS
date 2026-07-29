@@ -1,5 +1,6 @@
 package app.aaps.implementation.bolus
 
+import app.aaps.core.data.iob.CobInfo
 import app.aaps.core.data.model.BCR
 import app.aaps.core.data.model.BS
 import app.aaps.core.data.model.GlucoseUnit
@@ -25,6 +26,7 @@ import app.aaps.core.interfaces.notifications.NotificationId
 import app.aaps.core.interfaces.notifications.NotificationLevel
 import app.aaps.core.interfaces.profile.EffectiveProfile
 import app.aaps.core.interfaces.profile.ProfileStore
+import app.aaps.core.interfaces.pump.BolusProgressData
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
 import app.aaps.core.interfaces.pump.PumpWithConcentration
 import app.aaps.core.interfaces.queue.CommandQueue
@@ -69,10 +71,11 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     @Mock lateinit var uel: UserEntryLogger
     @Mock lateinit var loop: Loop
     @Mock lateinit var automation: Automation
+    @Mock lateinit var bolusProgressData: BolusProgressData
 
     private fun create() = WizardBolusExecutorImpl(
-        aapsLogger, rh, quickWizard, bolusWizardProvider, profileFunction, profileRepository, insulin, iobCobCalculator, constraintsChecker, activePlugin,
-        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager,
+        aapsLogger, rh, config, quickWizard, bolusWizardProvider, profileFunction, profileRepository, iobCobCalculator, constraintsChecker, activePlugin,
+        runningModeGuard, commandQueue, persistenceLayer, uel, loop, dateUtil, decimalFormatter, profileUtil, automation, notificationManager, bolusProgressData,
         CoroutineScope(Dispatchers.Unconfined)
     )
 
@@ -220,6 +223,9 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
         whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
         val executor = create()
+        // confirm() now constraint-caps the (insulin + correctionU) dose, so the passthrough must be stubbed
+        // even on the setPending path (which bypasses prepare()'s own constraint stubbing).
+        whenever(constraintsChecker.applyBolusConstraints(any())).thenAnswer { it.getArgument<Constraint<Double>>(0) }
         executor.setPending(insulin = 2.0, carbs = 0, bolusCalculatorResult = null, bolusId = 999L)
 
         val first = executor.confirm(999L, Sources.NSClient, { })
@@ -247,6 +253,9 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
         whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
         val executor = create()
+        // confirm() now constraint-caps the (insulin + correctionU) dose, so the passthrough must be stubbed
+        // even on the setPending path (which bypasses prepare()'s own constraint stubbing).
+        whenever(constraintsChecker.applyBolusConstraints(any())).thenAnswer { it.getArgument<Constraint<Double>>(0) }
         // bolusId is a timestamp; use realistic recent ids so evictStalePending's TTL window keeps them parked.
         executor.setPending(insulin = 1.0, carbs = 0, bolusCalculatorResult = null, bolusId = now)
         // A second actor's prepare (different bolusId) must NOT clobber the first — per-id slots, not one shared var.
@@ -279,6 +288,46 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
         verify(persistenceLayer).insertAndCancelCurrentTemporaryTarget(any(), any(), any(), anyOrNull(), any()) // target-raising TT applied unconditionally
         verify(commandQueue).bolus(anyOrNull()) // bolus delivered
+    }
+
+    @Test
+    fun prepareBatch_quickWizardGuid_marksOriginatingEntryUsedOnConfirmNotPrepare() = runTest {
+        // The master (SOT) marks the QuickWizard used on a successful commit — the client never writes the synced
+        // QuickWizard pref itself (which previously raced the commit → "Update settings … Another action in progress").
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        stubPassthroughConstraints()
+        val entry = mock<QuickWizardEntry>()
+        whenever(quickWizard.get("qw-1")).thenReturn(entry)
+        val executor = create()
+        val actions = listOf(
+            BatchAction.Bolus(insulin = 0.5, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "Pre-bolus", timestamp = 0L, iCfg = null, quickWizardGuid = "qw-1")
+        )
+
+        val prepared = executor.prepareBatch(actions) as WizardBolusExecutor.PrepareResult.Preview
+        verify(entry, never()).markAsUsed() // NOT marked at prepare time (consume-once: only a real delivery counts)
+
+        val result = executor.confirm(prepared.bolusId, Sources.QuickWizard, { })
+
+        assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        verify(entry).markAsUsed() // marked HERE on the master after the bolus is delivered
+    }
+
+    @Test
+    fun prepareBatch_noQuickWizardGuid_marksNothing() = runTest {
+        // A dialog / wear batch (no guid) must not resolve or mark any entry — guards against a false-positive mark.
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(true))
+        stubPassthroughConstraints()
+        val executor = create()
+        val actions = listOf(
+            BatchAction.Bolus(insulin = 0.5, carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null)
+        )
+
+        val prepared = executor.prepareBatch(actions) as WizardBolusExecutor.PrepareResult.Preview
+        executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        verify(quickWizard, never()).get(any<String>())
     }
 
     @Test
@@ -331,6 +380,65 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         verify(profileFunction, never()).createProfileSwitch(any(), any(), any(), any(), any(), anyOrNull(), any())
     }
 
+    // ---- prepareBatch(): negative carbs = COB removal (issue: was mislabeled "Bolus reported an error") ----
+
+    @Test
+    fun prepareBatch_negativeCarbsWithinCob_atNow_parksTheRemoval() = runTest {
+        stubPassthroughConstraints()
+        whenever(iobCobCalculator.getCobInfo(any())).thenReturn(CobInfo(0L, displayCob = 30.0, futureCarbs = 0.0))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(
+            listOf(BatchAction.Bolus(insulin = 0.0, carbs = -10, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null))
+        )
+
+        // A removal within COB is a real action — NOT a no-op — and is parked verbatim.
+        assertThat(prepared).isInstanceOf(WizardBolusExecutor.PrepareResult.Preview::class.java)
+        assertThat((prepared as WizardBolusExecutor.PrepareResult.Preview).carbs).isEqualTo(-10)
+    }
+
+    @Test
+    fun prepareBatch_negativeCarbsExceedingCob_clampsMagnitudeToCob() = runTest {
+        stubPassthroughConstraints()
+        whenever(iobCobCalculator.getCobInfo(any())).thenReturn(CobInfo(0L, displayCob = 5.0, futureCarbs = 0.0))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(
+            listOf(BatchAction.Bolus(insulin = 0.0, carbs = -10, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null))
+        )
+
+        // Can't remove more than the 5 g on board → clamped to -5, still a real action.
+        assertThat((prepared as WizardBolusExecutor.PrepareResult.Preview).carbs).isEqualTo(-5)
+    }
+
+    @Test
+    fun prepareBatch_negativeCarbsWithNoCob_isNoAction() = runTest {
+        stubPassthroughConstraints()
+        whenever(iobCobCalculator.getCobInfo(any())).thenReturn(CobInfo(0L, displayCob = 0.0, futureCarbs = 0.0))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(
+            listOf(BatchAction.Bolus(insulin = 0.0, carbs = -10, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null))
+        )
+
+        // Nothing on board to remove → a genuine no-op, surfaced as NoAction (neutral), never the bolus-error path.
+        assertThat(prepared).isEqualTo(WizardBolusExecutor.PrepareResult.NoAction)
+    }
+
+    @Test
+    fun prepareBatch_negativeCarbsInFuture_isNoAction() = runTest {
+        stubPassthroughConstraints()
+        whenever(iobCobCalculator.getCobInfo(any())).thenReturn(CobInfo(0L, displayCob = 30.0, futureCarbs = 0.0))
+        val executor = create()
+
+        val prepared = executor.prepareBatch(
+            listOf(BatchAction.Bolus(insulin = 0.0, carbs = -10, carbsTimeOffsetMinutes = 60, carbsDurationHours = 0, recordOnly = false, notes = "", timestamp = 0L, iCfg = null))
+        )
+
+        // A future-dated removal is dropped (you can't pre-remove carbs not yet on board) → NoAction.
+        assertThat(prepared).isEqualTo(WizardBolusExecutor.PrepareResult.NoAction)
+    }
+
     @Test
     fun prepareBatch_insulinActivate_parksAndConfirmAppliesViaCreateProfileSwitchWithNewInsulin() = runTest {
         stubPassthroughConstraints()
@@ -363,12 +471,33 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     }
 
     @Test
+    fun prepareBatch_twoBatchesInTheSameMillisecond_getDistinctIdsAndBothCommit() = runTest {
+        stubPassthroughConstraints()
+        // dateUtil.now() is frozen in the test base — which is exactly the production race. The fill dialog fires
+        // its insulin activation, site change and cartridge change as separate coroutines, so two prepares can land
+        // in the same millisecond. When the id was `dateUtil.now()` they shared a key: the second park overwrote the
+        // first, so one commit applied the WRONG batch and the other was rejected as NoPending.
+        val executor = create()
+        val cannula = BatchAction.TherapyEvent(teType = TE.Type.CANNULA_CHANGE, timestamp = 1_000L, source = Sources.FillDialog)
+        val cartridge = BatchAction.TherapyEvent(teType = TE.Type.INSULIN_CHANGE, timestamp = 2_000L, source = Sources.FillDialog)
+
+        val first = executor.prepareBatch(listOf(cannula)) as WizardBolusExecutor.PrepareResult.Preview
+        val second = executor.prepareBatch(listOf(cartridge)) as WizardBolusExecutor.PrepareResult.Preview
+
+        assertThat(first.bolusId).isNotEqualTo(second.bolusId)
+        // Both parked batches must survive independently — neither may consume or evict the other.
+        assertThat(executor.confirm(first.bolusId, Sources.FillDialog, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+        assertThat(executor.confirm(second.bolusId, Sources.FillDialog, { })).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
+    }
+
+    @Test
     fun prepareBatch_namedProfileSwitch_appliesViaNamedCreateProfileSwitchFromMasterStore() = runTest {
         stubPassthroughConstraints()
         val store = mock<ProfileStore>()
         whenever(store.getSpecificProfile("Lunch")).thenReturn(mock())
         whenever(profileRepository.profile).thenReturn(MutableStateFlow(store))
-        whenever(insulin.iCfg).thenReturn(mock())
+        // A named switch has to record an insulin; here it comes from the insulin in force.
+        whenever(profileFunction.getRunningOrRequestedICfg()).thenReturn(someICfg)
         val executor = create()
 
         val prepared = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(110, 0, 60, profileName = "Lunch"))) as WizardBolusExecutor.PrepareResult.Preview
@@ -376,8 +505,45 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
         assertThat(result).isEqualTo(WizardBolusExecutor.ConfirmResult.Delivered)
         // The named overload resolves the target from the MASTER's store (a client may relay a name the master owns).
-        verify(profileFunction).createProfileSwitch(eq(store), eq("Lunch"), eq(60), eq(110), eq(0), any(), eq(Action.PROFILE_SWITCH), eq(Sources.NSClient), anyOrNull(), any(), any())
+        verify(profileFunction).createProfileSwitch(eq(store), eq("Lunch"), eq(60), eq(110), eq(0), any(), eq(Action.PROFILE_SWITCH), eq(Sources.NSClient), anyOrNull(), any(), eq(someICfg))
     }
+
+    @Test
+    fun prepareBatch_namedProfileSwitch_carriesTheCallerSuppliedICfgEvenWithNothingRunning() = runTest {
+        stubPassthroughConstraints()
+        val store = mock<ProfileStore>()
+        whenever(store.getSpecificProfile("Lunch")).thenReturn(mock())
+        whenever(profileRepository.profile).thenReturn(MutableStateFlow(store))
+        // Nothing running and nothing pending — but the caller already asked the user (fill/prime, activation).
+        whenever(profileFunction.getRunningOrRequestedICfg()).thenReturn(null)
+        val chosen = ICfg(insulinLabel = "Chosen", insulinEndTime = 420, insulinPeakTime = 55, concentration = 1.0)
+        val executor = create()
+
+        val prepared = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(110, 0, 60, profileName = "Lunch", iCfg = chosen))) as WizardBolusExecutor.PrepareResult.Preview
+        executor.confirm(prepared.bolusId, Sources.NSClient, { })
+
+        // The user's choice wins over the (absent) in-force insulin and is what gets recorded.
+        verify(profileFunction).createProfileSwitch(eq(store), eq("Lunch"), eq(60), eq(110), eq(0), any(), eq(Action.PROFILE_SWITCH), eq(Sources.NSClient), anyOrNull(), any(), eq(chosen))
+    }
+
+    @Test
+    fun prepareBatch_namedProfileSwitch_noICfgAndNothingRunningOrPending_returnsError() = runTest {
+        stubPassthroughConstraints()
+        val store = mock<ProfileStore>()
+        whenever(store.getSpecificProfile("Lunch")).thenReturn(mock())
+        whenever(profileRepository.profile).thenReturn(MutableStateFlow(store))
+        whenever(profileFunction.getRunningOrRequestedICfg()).thenReturn(null)
+        val executor = create()
+
+        val result = executor.prepareBatch(listOf(BatchAction.ProfileSwitch(110, 0, 60, profileName = "Lunch")))
+
+        // Refuse rather than substitute an arbitrary insulin from the catalogue.
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        verify(profileFunction, never()).createProfileSwitch(any(), any(), any(), any(), any(), any(), any(), any(), anyOrNull(), any(), any())
+    }
+
+    // The running-vs-requested precedence itself belongs to ProfileFunction and is asserted in
+    // ProfileFunctionImplTest; here it is a stubbed collaborator, so re-testing it would prove nothing.
 
     @Test
     fun prepareBatch_namedProfileSwitch_notInMasterStore_returnsError() = runTest {
@@ -627,6 +793,7 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
     @Test
     fun prepareQuickWizard_netZeroInsulinAndZeroCarbs_returnsNoInsulinRequiredAndParksNothing() = runTest {
         // A correction-only QuickWizard (0 carbs) that nets to <= 0 insulin must error, not park an empty confirm.
+        whenever(config.appInitialized).thenReturn(true)
         whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
         val ads = mock<AutosensDataStore>()
         whenever(iobCobCalculator.ads).thenReturn(ads)
@@ -656,6 +823,23 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
         assertThat((result as WizardBolusExecutor.PrepareResult.Error).message).isEqualTo("No insulin required")
         // Nothing parked → a confirm of the wizard timestamp finds no pending dose (no phantom delivery).
         verify(commandQueue, never()).bolus(anyOrNull())
+    }
+
+    @Test
+    fun prepareQuickWizard_beforeAppInitialized_returnsErrorWithoutTouchingPlugins() = runTest {
+        // Regression: a remote QuickWizard prepare landing during the master's startup window (before
+        // verifySelectionInCategories() populated activeAPS) must be rejected here — NOT crash later in
+        // BolusWizard.doCalc with "APS not defined". The guard bails before any plugin / profile access.
+        whenever(config.appInitialized).thenReturn(false)
+        whenever(rh.gs(any<Int>())).thenReturn("Initializing…")
+        val executor = create()
+
+        val result = executor.prepareQuickWizard("g")
+
+        assertThat(result).isInstanceOf(WizardBolusExecutor.PrepareResult.Error::class.java)
+        assertThat((result as WizardBolusExecutor.PrepareResult.Error).message).isEqualTo("Initializing…")
+        verify(runningModeGuard, never()).rejectionMessage(any())
+        verify(quickWizard, never()).get(any<String>())
     }
 
     @Test
@@ -710,6 +894,25 @@ class WizardBolusExecutorImplTest : TestBaseWithProfile() {
 
         // The async delivery failure raises the single URGENT alarm from the executor (not the now-gone dialog).
         verify(notificationManager).post(
+            eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
+            anyOrNull<Int>(), any<List<NotificationAction>>(), anyOrNull<() -> Boolean>()
+        )
+    }
+
+    @Test
+    fun bolus_onCommandFailure_whenStopPressed_doesNotPostAlarm() = runTest {
+        whenever(runningModeGuard.rejectionMessage(any())).thenReturn(null)
+        whenever(commandQueue.bolus(anyOrNull())).thenReturn(pumpEnactResultProvider.get().success(false))
+        whenever(bolusProgressData.isStopPressed).thenReturn(true)
+        val executor = create()
+
+        executor.deliverWizardBolus(
+            insulin = 1.0, carbs = 0, carbTimeMinutes = 0, mgdlGlucose = null,
+            bolusCalculatorResult = null, notes = null, source = Sources.QuickWizard, onError = { }
+        )
+
+        // A user-initiated cancel is not a failure: no URGENT alarm even though the command result is unsuccessful.
+        verify(notificationManager, never()).post(
             eq(NotificationId.BOLUS_DELIVERY_FAILED), any<String>(), any<NotificationLevel>(), any<Int>(),
             anyOrNull<Int>(), any<List<NotificationAction>>(), anyOrNull<() -> Boolean>()
         )

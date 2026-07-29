@@ -2,16 +2,16 @@ package app.aaps.ui.compose.overview.chips
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
@@ -26,7 +26,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.aaps.core.data.model.RM
@@ -44,6 +43,12 @@ import app.aaps.core.ui.compose.icons.IcLoopSuperbolus
 import app.aaps.core.ui.compose.loopColor
 import app.aaps.ui.compose.overview.graphs.TriangleShape
 
+/**
+ * @see RunningModeChipClosedLoopPreview
+ * @see RunningModeChipSuspendedPreview
+ * @see RunningModeChipClosedLoopSmbPreview
+ * @see RunningModeChipOpenLoopSmbPreview
+ */
 @Composable
 fun RunningModeChip(
     mode: RM.Mode,
@@ -53,6 +58,7 @@ fun RunningModeChip(
     remaining: String = "",
     sceneManaged: Boolean = false,
     smbEnabled: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit = {}
 ) {
     val isTemporary = mode.mustBeTemporary()
@@ -66,6 +72,7 @@ fun RunningModeChip(
     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
         Surface(
             onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
+            enabled = enabled,
             shape = RoundedCornerShape(AapsSpacing.chipCornerRadius),
             color = containerColor,
             modifier = modifier
@@ -162,54 +169,4 @@ internal fun RM.Mode.toIcon(): ImageVector = when (this) {
     RM.Mode.SUSPENDED_BY_USER -> IcLoopPaused
 
     RM.Mode.RESUME            -> IcLoopClosed
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun RunningModeChipClosedLoopPreview() {
-    MaterialTheme {
-        RunningModeChip(
-            mode = RM.Mode.CLOSED_LOOP,
-            text = "Closed Loop",
-            progress = 0f
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun RunningModeChipSuspendedPreview() {
-    MaterialTheme {
-        RunningModeChip(
-            mode = RM.Mode.SUSPENDED_BY_USER,
-            text = "Suspended (30 min)",
-            progress = 0.4f
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun RunningModeChipClosedLoopSmbPreview() {
-    MaterialTheme {
-        RunningModeChip(
-            mode = RM.Mode.CLOSED_LOOP,
-            text = "Closed Loop",
-            progress = 0f,
-            smbEnabled = true
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun RunningModeChipOpenLoopSmbPreview() {
-    MaterialTheme {
-        RunningModeChip(
-            mode = RM.Mode.OPEN_LOOP,
-            text = "Open Loop",
-            progress = 0f,
-            smbEnabled = true
-        )
-    }
 }

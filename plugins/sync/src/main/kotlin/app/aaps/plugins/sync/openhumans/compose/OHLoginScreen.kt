@@ -42,7 +42,6 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.AapsSpacing
@@ -98,8 +97,11 @@ internal fun OHLoginScreen(
     }
 }
 
+/**
+ * @see WelcomeStepPreview
+ */
 @Composable
-private fun WelcomeStep(onNext: () -> Unit) {
+internal fun WelcomeStep(onNext: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -146,8 +148,11 @@ private fun WelcomeStep(onNext: () -> Unit) {
     }
 }
 
+/**
+ * @see ConsentStepPreview
+ */
 @Composable
-private fun ConsentStep(authUrl: String) {
+internal fun ConsentStep(authUrl: String) {
     val context = LocalContext.current
     var accepted by rememberSaveable { mutableStateOf(false) }
 
@@ -287,8 +292,11 @@ private fun DataList(items: List<Int>) {
     )
 }
 
+/**
+ * @see ConfirmStepPreview
+ */
 @Composable
-private fun ConfirmStep(
+internal fun ConfirmStep(
     onCancel: () -> Unit,
     onProceed: () -> Unit
 ) {
@@ -328,8 +336,11 @@ private fun ConfirmStep(
     }
 }
 
+/**
+ * @see FinishingStepPreview
+ */
 @Composable
-private fun FinishingStep() {
+internal fun FinishingStep() {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -359,8 +370,11 @@ private fun FinishingStep() {
     }
 }
 
+/**
+ * @see DoneStepPreview
+ */
 @Composable
-private fun DoneStep(onClose: () -> Unit) {
+internal fun DoneStep(onClose: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -397,45 +411,5 @@ private fun DoneStep(onClose: () -> Unit) {
         ) {
             Text(stringResource(R.string.close))
         }
-    }
-}
-
-@Preview(showBackground = true, name = "Welcome")
-@Composable
-private fun WelcomeStepPreview() {
-    MaterialTheme {
-        WelcomeStep(onNext = {})
-    }
-}
-
-@Preview(showBackground = true, name = "Consent")
-@Composable
-private fun ConsentStepPreview() {
-    MaterialTheme {
-        ConsentStep(authUrl = "https://example.com/auth")
-    }
-}
-
-@Preview(showBackground = true, name = "Confirm")
-@Composable
-private fun ConfirmStepPreview() {
-    MaterialTheme {
-        ConfirmStep(onCancel = {}, onProceed = {})
-    }
-}
-
-@Preview(showBackground = true, name = "Finishing")
-@Composable
-private fun FinishingStepPreview() {
-    MaterialTheme {
-        FinishingStep()
-    }
-}
-
-@Preview(showBackground = true, name = "Done")
-@Composable
-private fun DoneStepPreview() {
-    MaterialTheme {
-        DoneStep(onClose = {})
     }
 }

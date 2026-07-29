@@ -34,13 +34,14 @@
     <string name="failed_update_basal_profile">Failed to update basal profile</string>
     <string name="no_valid_basal_rate">No valid basal rate read from pump</string>
     <string name="limiting_iob">Limiting IOB to %1$.1f U because of %2$s</string>
-    <string name="loop_disabled">LOOP DISABLED BY CONSTRAINTS</string>
     <string name="loop_disabled_by_user">Loop disabled by user</string>
     <string name="event_type">Event type</string>
-    <string name="mgdl">mg/dl</string>
-    <string name="mmol">mmol/l</string>
-    <string name="bg_mgdl">%1$d mg/dl</string>
-    <string name="bg_mmol">%1$.1f mmol/l</string>
+    <string name="mgdl">mg/dL</string>
+    <string name="mmol">mmol/L</string>
+    <string name="profile_isf_units_mgdl">mg/dL/U</string>
+    <string name="profile_isf_units_mmol">mmol/L/U</string>
+    <string name="bg_mgdl">%1$d mg/dL</string>
+    <string name="bg_mmol">%1$.1f mmol/L</string>
     <string name="save">Save</string>
     <string name="skip">Skip</string>
     <string name="switch_to_edit">Edit</string>
@@ -60,11 +61,11 @@
     <string name="configbuilder_pick_one_hint">Choose one. Only one can be active at a time.</string>
     <string name="configbuilder_pick_many_hint">Choose any that apply.</string>
     <string name="configbuilder_no_selection_warning">No plugin is selected in this category.</string>
-    <string name="simple_mode">Simple mode</string>
+    <string name="configbuilder_switch_confirmation_title">Switch plugin?</string>
+    <string name="configbuilder_switch_confirmation">This will disable %1$s and enable %2$s.</string>
     <string name="expand">Expand</string>
     <string name="collapse">Collapse</string>
     <string name="no_compose_preferences">No preferences available for this plugin</string>
-    <string name="plugin_no_preferences">Plugin does not support preferences</string>
     <string name="confirm_password_hint">Confirm password</string>
     <string name="confirm_pin_hint">Confirm PIN</string>
     <string name="preference_range_summary" comment="%1$s=current value, %2$s=unit label, %3$s=minimum, %4$s=maximum. Example: 5.0 U (0.0 – 10.0)">%1$s%2$s (%3$s – %4$s)</string>
@@ -97,7 +98,6 @@
     <string name="mute">Mute</string>
     <string name="success">Success</string>
     <string name="advanced_settings_title">Advanced Settings</string>
-    <string name="extendedbolusdeliveryerror">Extended bolus delivery error</string>
     <string name="extended_bolus">Extended bolus</string>
     <string name="paused">Paused</string>
     <string name="running">Running</string>
@@ -107,8 +107,9 @@
     <string name="androidaps_start">AAPS started</string>
     <string name="formatsignedinsulinunits">%1$+.2f U</string>
     <string name="format_carbs">%1$d g</string>
+    <string name="format_carbs_split" comment="Compact carbs summary when a food type splits the entry into immediate + extended carbs. %1$d=immediate carbs (g), %2$d=extended (eCarbs) carbs (g). Example: 9+2 g">%1$d+%2$d g</string>
     <string name="format_hours">%1$.2f h</string>
-    <string name="format_mins">%1$d mins</string>
+    <string name="format_mins">%1$d min</string>
     <string name="confirmation_line" comment="Confirmation-summary line, joins a label and an already-formatted value. %1$s = label, %2$s = value with its unit. Example: Bolus: 1.50 U">%1$s: %2$s</string>
     <string name="value_with_unit" comment="A numeric value followed by its unit, when no dedicated value template exists. %1$s = value, %2$s = unit. Example: 120 mg/dl">%1$s %2$s</string>
     <string name="objectives">Objectives</string>
@@ -118,6 +119,12 @@
     <string name="carbs">Carbs</string>
     <string name="invalid_profile">Invalid profile!</string>
     <string name="no_profile_set">NO PROFILE SET</string>
+    <string name="profile_switch_no_insulin">Cannot switch profile: no insulin is in use, and none was selected.</string>
+    <string name="profile_switch_select_insulin_hint">No insulin is in use yet. Select the insulin you are using, so this profile switch can record it.</string>
+    <string name="insulin_activation_failed">The insulin was not switched. Your previous insulin is still in use.</string>
+    <string name="insulin_activation_failed_reason" comment="%1$s=localized failure reason. Example: The insulin was not switched: Master not reachable. Your previous insulin is still in use.">The insulin was not switched: %1$s. Your previous insulin is still in use.</string>
+    <string name="insulin_activation_unconfirmed">The insulin switch could not be confirmed. Check which insulin is active in your profile before dosing.</string>
+    <string name="fill_prime_failed_insulin_not_switched" comment="%1$s=the delivery error message from the failed prime. Shown as one message because the insulin switch was chained to the prime succeeding.">%1$s\n\nThe insulin was also not switched.</string>
     <string name="active"><![CDATA[<Active>]]></string>
     <string name="date">Date</string>
     <string name="units_label">Units</string>
@@ -198,7 +205,7 @@
     <string name="profileswitch_ismissing">ProfileSwitch missing. Please do a profile switch or press \"Activate Profile\" in the LocalProfile.</string>
     <string name="profile">Profile</string>
     <string name="percentage_label">Percentage</string>
-    <string name="timeshift_label">Timeshift</string>
+    <string name="timeshift_label">Time shift</string>
     <string name="confirm_remove_multiple_items">Are you sure you want to remove %1$d items</string>
     <string name="overview_treatment_label">Treatment</string>
     <string name="copytolocalprofile">Create new profile from this profile?</string>
@@ -265,7 +272,6 @@
     <string name="basalprofilenotaligned">Basal values not aligned to hours: %1$s</string>
     <string name="minimalbasalvaluereplaced">Basal value replaced by minimum supported value: %1$s</string>
     <string name="maximumbasalvaluereplaced">Basal value replaced by maximum supported value: %1$s</string>
-    <string name="profile_per_unit">/U</string>
     <string name="profile_ins_units_per_hour">U/h</string>
     <string name="profile_carbs_per_unit">g/U</string>
 
@@ -357,6 +363,7 @@
     <string name="scene_deactivate">End Scene</string>
     <string name="scene_active">Active</string>
     <string name="scene_ended">Scene ended</string>
+    <string name="scene_end_active">End active scene</string>
     <string name="scene_confirm_activate">Activate scene \"%1$s\"?</string>
     <string name="scene_confirm_deactivate">End scene \"%1$s\" and revert changes?</string>
     <string name="scene_conflict_active_tt">Active temporary target will be replaced</string>
@@ -364,7 +371,8 @@
     <string name="scene_conflict_active_running_mode">Active running mode will be replaced</string>
     <string name="scene_conflict_active_scene">Active scene \"%1$s\" will be ended first</string>
     <string name="scene_action_tt">Temp target: %1$s</string>
-    <string name="scene_action_profile">Profile: %1$s %2$d%%</string>
+    <string name="scene_action_profile" comment="%1$s=profile name, %2$d=percentage. Example: Profile: Default 150%">Profile: %1$s %2$d%%</string>
+    <string name="scene_action_profile_pct_only" comment="%1$d=percentage, used when no specific named profile. Example: Profile: 150%">Profile: %1$d%%</string>
     <string name="scene_action_smb_on">Enable SMB</string>
     <string name="scene_action_smb_off">Disable SMB</string>
     <string name="scene_action_running_mode">Running mode: %1$s</string>
@@ -373,7 +381,6 @@
     <string name="scene_management_desc">Create, edit, and manage scenes</string>
     <string name="scene_action_count">%1$d actions</string>
     <string name="scene_start_from_template">Start from template</string>
-    <string name="scene_editor_reason">Reason</string>
     <string name="scene_editor_target">Target</string>
     <string name="scene_editor_tt_preset">TT preset</string>
     <string name="scene_editor_no_tt_presets">No TT presets configured</string>
@@ -396,8 +403,11 @@
     <string name="scene_no_actions">Scene has no actions</string>
     <string name="scene_profile_not_found">Profile \"%1$s\" not found</string>
     <string name="scene_lock_banner_master_offline">Master device unreachable. Scene controls will resume when connection is restored.</string>
+    <string name="scene_lock_banner_control_disabled">Master has disabled remote control. Scene controls will resume when it is re-enabled on the master.</string>
     <string name="master_offline_banner">Master device unreachable. Editing is disabled until the connection is restored.</string>
+    <string name="master_control_disabled_banner">Master has disabled remote control. Editing is disabled until it is re-enabled on the master.</string>
     <string name="scene_lock_reason_master_offline">Master disconnected</string>
+    <string name="scene_lock_reason_control_disabled">Remote control disabled</string>
     <string name="scene_lock_reason_scene_active">Stop the running scene first</string>
 
     <!-- Client-control action labels (shown in the pending/failure modal as "Couldn't {label}") -->
@@ -405,10 +415,8 @@
     <string name="clientcontrol_action_cancel_temp_target">Cancel temp target</string>
     <string name="clientcontrol_action_activate_scene">Activate scene %1$s</string>
     <string name="clientcontrol_action_deactivate_scene">End scene</string>
-    <string name="clientcontrol_action_activate_insulin">Activate insulin %1$s</string>
     <string name="clientcontrol_action_update_settings">Update settings</string>
     <string name="clientcontrol_action_deliver_bolus">Deliver bolus</string>
-    <string name="clientcontrol_action_record_bolus">Record bolus</string>
 
     <!-- Client-control failure reasons (mapped from a FailureReason code on the showing device) -->
     <string name="clientcontrol_fail_not_paired">This device isn\'t paired with a master.</string>
@@ -420,9 +428,11 @@
     <string name="clientcontrol_fail_send_failed">Couldn\'t reach Nightscout.</string>
     <string name="clientcontrol_fail_no_active_profile">The master has no active profile to apply it onto.</string>
     <string name="clientcontrol_fail_scene_not_found">The scene no longer exists.</string>
+    <string name="clientcontrol_fail_site_entry_not_found">The site entry no longer exists.</string>
     <string name="clientcontrol_fail_scene_disabled">The scene is disabled.</string>
     <string name="clientcontrol_fail_partial">Some actions couldn\'t be applied.</string>
     <string name="clientcontrol_fail_execution">The master couldn\'t apply it.</string>
+    <string name="clientcontrol_fail_control_disabled">Remote control is turned off on the master.</string>
     <string name="clientcontrol_fail_no_pending_bolus">The prepared bolus expired or was superseded. Tap the button again.</string>
     <string name="clientcontrol_fail_bolus_compute">The master couldn\'t calculate the bolus (missing glucose / profile, or pump not ready).</string>
     <string name="clientcontrol_fail_internal">Something went wrong.</string>
@@ -492,7 +502,6 @@
     <string name="activation">Activation</string>
     <string name="temp_target_management">Temp Target</string>
     <string name="revert_to_defaults">Revert to defaults</string>
-    <string name="confirm_cancel_temp_target">Cancel active temporary target?</string>
     <string name="loop">Loop</string>
     <string name="ns">NS</string>
     <string name="record">Record</string>
@@ -688,8 +697,6 @@
     <string name="no_profile_selected">No profile selected</string>
     <string name="missing_profile_name">Missing profile name</string>
     <string name="profile_not_saved_activate">Profile not saved. Please save the profile before activating.</string>
-    <string name="profile_activation_failed">Profile activation failed</string>
-    <string name="profile_switch_save_failed">Profile switch could not be saved. Please try again.</string>
     <string name="profile_basal_not_compatible_with_pump">Basal rate is not compatible with the current pump and cannot be activated. Reduce the percentage or adjust the basal rate.</string>
     <string name="profile_pump_incompatible_label">Pump limit</string>
     <string name="error_in_ic_values">Error in IC values</string>
@@ -775,12 +782,10 @@
     <string name="wizard_include_cob">Include COB</string>
     <string name="wizard_calculation">Calculation</string>
     <string name="no_action_selected">No action selected, nothing will happen</string>
-    <string name="carb_equal_zero_no_action">Carbs = 0. No action taken!</string>
-    <string name="bolus_equal_zero_no_action">Bolus = 0. No action taken!</string>
+    <string name="carbs_removal_cob_limit" comment="Shown under the carbs field when removing carbs (a negative value). %1$d = grams of carbs currently on board, the maximum removable. Example: Max removal: 30 g (carbs on board)">Max removal: %1$d g (carbs on board)</string>
     <string name="wizard_no_insulin_required">No insulin required</string>
     <string name="wizard_no_actual_bg">No recent BG to base calculation on!</string>
     <string name="wizard_no_active_profile">No active profile set!</string>
-    <string name="wizard_no_cob">Unknown COB! BG reading missing or recent app restart?</string>
     <string name="wizard_carbs_constraint">Carb constraint violation!</string>
     <string name="wizard_trend_detail">15min trend (%1$s %2$s)</string>
     <string name="wizard_constraint_bolus_size">Insulin constraint violation!\nCannot deliver %1$.2fU</string>
@@ -924,7 +929,8 @@
     <string name="cloud_auth_success">Cloud storage authentication successful</string>
     <string name="authorization_status">Authorization Status</string>
 
-    <string name="format_hour_minute">%1$dh %2$dm</string>
+    <string name="format_hour_minute" comment="%1$d=hours, %2$d=minutes. Example: 1 h 23 min">%1$d h %2$d min</string>
+    <string name="format_hours_only" comment="%1$d=hours, when minutes are zero. Example: 4 h">%1$d h</string>
 
     <!-- datetime layout -->
     <string name="event_time_label">Event time</string>
@@ -978,9 +984,15 @@
     <string name="add">Add</string>
     <string name="remove">Remove</string>
     <string name="reorder">Reorder</string>
+    <string name="carousel_move_earlier" comment="Content description of the button that moves the centred carousel card one position towards the start of the list. Order-relative wording (not left/right) so it stays correct in right-to-left languages.">Move earlier</string>
+    <string name="carousel_move_later" comment="Content description of the button that moves the centred carousel card one position towards the end of the list. Order-relative wording (not left/right) so it stays correct in right-to-left languages.">Move later</string>
+    <string name="carousel_show_card" comment="Screen-reader label for tapping a carousel card. The tap centres the card and shows its details below — it does not activate or apply anything.">Show details</string>
+    <string name="presets_changed_reorder_aborted">Presets changed elsewhere. The new order was not saved.</string>
+    <string name="carousel_position" comment="Compact position readout shown between the reorder buttons. %1$d=position of the centred card starting at 1, %2$d=total cards. Example: 3 / 7">%1$d / %2$d</string>
+    <string name="carousel_position_description" comment="Spoken form of carousel_position, read out by screen readers after each move. %1$d=position of the centred card starting at 1, %2$d=total cards. Example: Position 3 of 7">Position %1$d of %2$d</string>
     <string name="status">Status</string>
     <string name="pump_actions">Pump actions</string>
-    <string name="tempbasal_button">TempBasal</string>
+    <string name="tempbasal_button">Temp Basal</string>
     <string name="extended_bolus_button">Extended Bolus</string>
     <string name="device_maintenance">Device Maintenance</string>
     <string name="from_label">From</string>
@@ -1144,8 +1156,6 @@
     <string name="sensitivity_shortname" comment="Short label for Sensitivity/Autosens graph series">SENS%</string>
     <string name="variable_sensitivity_shortname" comment="Short label for Variable Sensitivity graph series">VSENS</string>
     <string name="steps_shortname" comment="Short label for Steps graph series">STEPS</string>
-    <string name="remove_items">Remove Items</string>
-    <string name="sort_items">Sort Items</string>
 
 
 </resources>

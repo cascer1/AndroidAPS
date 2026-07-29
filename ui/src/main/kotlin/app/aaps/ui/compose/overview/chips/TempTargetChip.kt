@@ -20,7 +20,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.tooling.preview.Preview
 import app.aaps.core.data.model.TT
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
@@ -31,6 +30,10 @@ import app.aaps.core.ui.compose.icons.IcTtManual
 import app.aaps.core.ui.compose.ttReasonColor
 import app.aaps.ui.compose.main.TempTargetChipState
 
+/**
+ * @see TempTargetChipActivePreview
+ * @see TempTargetChipNonePreview
+ */
 @Composable
 fun TempTargetChip(
     targetText: String,
@@ -39,7 +42,8 @@ fun TempTargetChip(
     reason: TT.Reason?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    sceneManaged: Boolean = false
+    sceneManaged: Boolean = false,
+    enabled: Boolean = true
 ) {
     val iconColor = when (state) {
         TempTargetChipState.Active   -> reason.toIconColor()
@@ -56,6 +60,7 @@ fun TempTargetChip(
 
     Surface(
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
+        enabled = enabled,
         shape = RoundedCornerShape(AapsSpacing.chipCornerRadius),
         color = containerColor,
         modifier = modifier
@@ -108,32 +113,4 @@ private fun TT.Reason?.toIcon(): ImageVector = when (this) {
     TT.Reason.ACTIVITY     -> IcTtActivity
     TT.Reason.HYPOGLYCEMIA -> IcTtHypo
     else                   -> IcTtManual // Custom, Automation, Wear, null
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun TempTargetChipActivePreview() {
-    MaterialTheme {
-        TempTargetChip(
-            targetText = "5.5 - 5.5 (30 min)",
-            state = TempTargetChipState.Active,
-            progress = 0.5f,
-            reason = TT.Reason.EATING_SOON,
-            onClick = {}
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun TempTargetChipNonePreview() {
-    MaterialTheme {
-        TempTargetChip(
-            targetText = "5.0 - 7.0",
-            state = TempTargetChipState.None,
-            progress = 0f,
-            reason = null,
-            onClick = {}
-        )
-    }
 }

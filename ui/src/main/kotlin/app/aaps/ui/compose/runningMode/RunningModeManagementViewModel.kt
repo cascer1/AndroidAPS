@@ -13,6 +13,7 @@ import app.aaps.core.interfaces.aps.Loop
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
+import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.interfaces.clientcontrol.FailureReason
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
@@ -22,6 +23,7 @@ import app.aaps.core.interfaces.di.ApplicationScope
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventShowDialog
@@ -54,6 +56,7 @@ import javax.inject.Inject
 class RunningModeManagementViewModel @Inject constructor(
     private val loop: Loop,
     private val activePlugin: ActivePlugin,
+    private val profileFunction: ProfileFunction,
     private val translator: Translator,
     private val preferences: Preferences,
     private val persistenceLayer: PersistenceLayer,
@@ -84,6 +87,10 @@ class RunningModeManagementViewModel @Inject constructor(
                 val currentMode = runningModeRecord.mode
                 val allowedModes = loop.allowedNextModes()
                 val pumpDescription: PumpDescription = activePlugin.activePump.pumpDescription
+                // Whether a profile is actually set. [Loop.allowedNextModes] returns an empty list both when no
+                // profile is set AND when the pump force-suspends (SUSPENDED_BY_PUMP); only the former should
+                // surface the "no profile set" card, so check the real condition instead of the empty list.
+                val profileSet = profileFunction.isProfileValid("RunningModeScreen")
 
                 _uiState.update {
                     it.copy(
@@ -91,6 +98,7 @@ class RunningModeManagementViewModel @Inject constructor(
                         currentModeText = translator.translate(currentMode),
                         reasons = runningModeRecord.reasons,
                         allowedNextModes = allowedModes,
+                        profileSet = profileSet,
                         tempDurationStep15mAllowed = pumpDescription.tempDurationStep15mAllowed,
                         tempDurationStep30mAllowed = pumpDescription.tempDurationStep30mAllowed,
                         isLoading = false
@@ -160,8 +168,8 @@ class RunningModeManagementViewModel @Inject constructor(
 
                 // Master-local validation failure, or a client offline; a client round-trip failure already showed on the app modal.
                 is ActionProgress.Rejected -> {
-                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                        rxBus.send(EventShowSnackbar(prepared.detail ?: rh.gs(R.string.running_mode_change_not_allowed), EventShowSnackbar.Type.Error))
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                        rxBus.send(EventShowSnackbar(prepared.detail ?: rh.gs(prepared.reason.failTextResId()), EventShowSnackbar.Type.Error))
                 }
 
                 else                       -> Unit // Unconfirmed → handled by the app-level pending modal
@@ -189,6 +197,7 @@ data class RunningModeManagementUiState(
     val currentModeText: String = "",
     val reasons: String? = null,
     val allowedNextModes: List<RM.Mode> = emptyList(),
+    val profileSet: Boolean = true,
     val tempDurationStep15mAllowed: Boolean = false,
     val tempDurationStep30mAllowed: Boolean = false,
     val isLoading: Boolean = true

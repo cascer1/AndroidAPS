@@ -5,11 +5,9 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,7 +53,6 @@ fun OverviewScreenStacked(
     tbrState: TbrState,
     smbEnabled: Boolean,
     isSimpleMode: Boolean,
-    calcProgress: Int,
     graphViewModel: GraphViewModel,
     chipsViewModel: ChipsViewModel,
     manageViewModel: ManageViewModel,
@@ -70,6 +67,7 @@ fun OverviewScreenStacked(
     onEndScene: () -> Unit = {},
     onDismissScene: () -> Unit = {},
     endSceneEnabled: Boolean = true,
+    commandsAllowed: Boolean = true,
     formatDuration: (Long) -> String = { ms -> "${(ms / 60000L).toInt()}m" },
     modifier: Modifier = Modifier
 ) {
@@ -88,14 +86,6 @@ fun OverviewScreenStacked(
             .padding(paddingValues)
             .verticalScroll(rememberScrollState())
     ) {
-        if (calcProgress < 100) {
-            LinearProgressIndicator(
-                progress = { calcProgress / 100f },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp),
-            )
-        }
         ActiveSceneBanner(
             activeState = activeSceneState,
             expired = sceneExpired,
@@ -142,6 +132,7 @@ fun OverviewScreenStacked(
                 onNavigate = onNavigate,
                 onTbrChipClick = onTbrChipClick,
                 onIobChipClick = onIobChipClick,
+                commandsAllowed = commandsAllowed,
                 modifier = Modifier
                     .weight(1f)
                     .padding(start = 8.dp)
@@ -155,6 +146,7 @@ fun OverviewScreenStacked(
             batteryStatus = statusState.batteryStatus,
             showFill = statusState.showFill,
             showPumpBatteryChange = statusState.showPumpBatteryChange,
+            commandsAllowed = commandsAllowed,
             onNavigate = onNavigate,
             statusLightsDef = statusLightsDef,
             onCopyFromNightscout = { manageViewModel.copyStatusLightsFromNightscout() },

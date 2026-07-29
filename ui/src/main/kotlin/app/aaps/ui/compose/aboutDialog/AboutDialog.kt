@@ -30,7 +30,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.net.toUri
@@ -44,6 +43,9 @@ data class AboutDialogData(
     val enabledOptions: List<ExternalOptions> = emptyList()
 )
 
+/**
+ * @see AboutAlertDialogPreview
+ */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AboutAlertDialog(
@@ -120,22 +122,6 @@ fun AboutAlertDialog(
         },
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = true)
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AboutAlertDialogPreview() {
-    MaterialTheme {
-        AboutAlertDialog(
-            data = AboutDialogData(
-                title = "AndroidAPS 3.3.0",
-                message = "Build: 3.3.0-dev\nFlavor: full\n\nhttps://androidaps.org",
-                icon = R.drawable.splash_logo,
-                enabledOptions = listOf(ExternalOptions.ENGINEERING_MODE, ExternalOptions.UNFINISHED_MODE)
-            ),
-            onDismiss = {}
-        )
-    }
 }
 
 @Composable

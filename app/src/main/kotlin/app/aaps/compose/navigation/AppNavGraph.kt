@@ -36,6 +36,7 @@ import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.constraints.Objectives
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.maintenance.FileListProvider
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.plugin.PermissionGroup
 import app.aaps.core.interfaces.plugin.PluginBase
@@ -47,13 +48,12 @@ import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.StringKey
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.ui.compose.AapsTopAppBar
 import app.aaps.core.ui.compose.ComposablePluginContent
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.core.ui.compose.ToolbarConfig
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.LocalPluginNavigationRequest
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.preference.PluginPreferencesScreen
@@ -97,7 +97,6 @@ import app.aaps.ui.compose.runningMode.RunningModeScreen
 import app.aaps.ui.compose.scenes.SceneListScreen
 import app.aaps.ui.compose.scenes.wizard.SceneWizardScreen
 import app.aaps.ui.compose.siteRotationDialog.SiteRotationManagementScreen
-import app.aaps.ui.compose.siteRotationDialog.SiteRotationSettingsScreen
 import app.aaps.ui.compose.siteRotationDialog.viewModels.SiteRotationManagementViewModel
 import app.aaps.ui.compose.stats.StatsScreen
 import app.aaps.ui.compose.stats.viewmodels.StatsViewModel
@@ -154,7 +153,7 @@ fun NavGraphBuilder.appNavGraph(
     builtInSearchables: BuiltInSearchables,
     prefFileList: FileListProvider,
     persistenceLayer: PersistenceLayer,
-    visibilityContext: PreferenceVisibilityContext,
+    visibilityContext: VisibilityContext,
     // Callbacks
     onNavigationRequest: (NavigationRequest, NavHostController) -> Unit,
     onShowDeliveryError: (comment: String, titleResId: Int) -> Unit,
@@ -277,9 +276,8 @@ fun NavGraphBuilder.appNavGraph(
         FillDialogScreen(
             fillButtonsDef = builtInSearchables.fillButtons,
             onNavigateBack = { navController.safePopBackStack() },
-            onShowDeliveryError = { comment ->
-                onShowDeliveryError(comment, app.aaps.core.ui.R.string.treatmentdeliveryerror)
-            },
+            // No delivery-error callback: this dialog's failures all land after it has navigated away, so the
+            // ViewModel reports them on the app-level dialog bus instead of through a screen-scoped collector.
             onPickSiteLocation = {
                 navController.navigate(AppRoute.SiteLocationPicker.createRoute(TE.Type.CANNULA_CHANGE))
             },
@@ -399,6 +397,12 @@ fun NavGraphBuilder.appNavGraph(
         val profileName = profileManagementViewModel.uiState.value.profileNames.getOrNull(profileIndex) ?: ""
         val reuseValues = profileManagementViewModel.getReuseValues()
         val coroutineScope = rememberCoroutineScope()
+        // Resolving "is an insulin in force?" is suspending, so the screen starts with no picker and gains
+        // one only if the answer comes back empty-handed (first-ever switch).
+        val insulinChoice by produceState(
+            initialValue = ProfileManagementViewModel.InsulinChoice(emptyList(), null),
+            key1 = profileIndex
+        ) { value = profileManagementViewModel.insulinChoice() }
 
         ProfileActivationScreen(
             profileName = profileName,
@@ -410,7 +414,9 @@ fun NavGraphBuilder.appNavGraph(
             rh = rh,
             onNavigateBack = { navController.safePopBackStack() },
             checkPumpCompatible = { percentage -> profileManagementViewModel.isPumpCompatible(profileIndex, percentage) },
-            onActivate = { duration, percentage, timeshift, withTT, notes, timestamp, timeChanged ->
+            insulinChoices = insulinChoice.choices,
+            preselectedInsulin = insulinChoice.preselected,
+            onActivate = { duration, percentage, timeshift, withTT, notes, timestamp, timeChanged, iCfg ->
                 coroutineScope.launch {
                     profileManagementViewModel.activateProfile(
                         profileIndex = profileIndex,
@@ -421,10 +427,17 @@ fun NavGraphBuilder.appNavGraph(
                         notes = notes,
                         timestamp = timestamp,
                         timeChanged = timeChanged,
+                        iCfg = iCfg,
                         // Close only AFTER the user confirms and the switch actually commits (not when the confirm
-                        // dialog is merely shown). inclusive = true pops the Profile management screen too, so we
-                        // return to the screen it was opened from (e.g. Overview).
-                        onSuccess = { navController.popBackStack(AppRoute.Profile.route, inclusive = true) }
+                        // dialog is merely shown). Opened from Profile management, inclusive = true pops that screen
+                        // too so we land on whatever opened it (e.g. Overview). Opened from the setup wizard there is
+                        // no Profile route on the stack at all — that call then pops nothing and returns false, which
+                        // used to leave this screen sitting open after a successful first-ever switch. Fall back to
+                        // popping this destination by its own route (not lifecycle-dependent, unlike safePopBackStack).
+                        onSuccess = {
+                            if (!navController.popBackStack(AppRoute.Profile.route, inclusive = true))
+                                navController.popBackStack(AppRoute.ProfileActivation.route, inclusive = true)
+                        }
                     )
                 }
             }
@@ -600,6 +613,7 @@ fun NavGraphBuilder.appNavGraph(
         app.aaps.ui.compose.configuration.PluginCategoryScreen(
             category = category,
             hardwarePumpConfirmation = configState.hardwarePumpConfirmation,
+            pluginSwitchConfirmation = configState.pluginSwitchConfirmation,
             onNavigateBack = { navController.safePopBackStack() },
             onNavigate = { request -> onNavigationRequest(request, navController) },
             onPluginEnableToggle = { pluginId, type, enabled ->
@@ -610,7 +624,12 @@ fun NavGraphBuilder.appNavGraph(
                 configurationViewModel.confirmHardwarePumpSwitch()
                 onRefreshPermissions()
             },
-            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() }
+            onDismissHardwarePump = { configurationViewModel.dismissHardwarePumpDialog() },
+            onConfirmPluginSwitch = {
+                configurationViewModel.confirmPluginSwitch()
+                onRefreshPermissions()
+            },
+            onDismissPluginSwitch = { configurationViewModel.dismissPluginSwitchDialog() }
         )
     }
 
@@ -698,16 +717,7 @@ fun NavGraphBuilder.appNavGraph(
         SiteRotationManagementScreen(
             viewModel = siteRotationManagementViewModel,
             onClose = { navController.safePopBackStack() },
-            onPreferenceClick = {
-                navController.navigate(AppRoute.SiteRotationSettings.route)
-            }
-        )
-    }
-
-    composable(AppRoute.SiteRotationSettings.route) {
-        SiteRotationSettingsScreen(
-            viewModel = siteRotationManagementViewModel,
-            onNavigateBack = { navController.safePopBackStack() }
+            siteRotationDef = builtInSearchables.siteRotation
         )
     }
 
@@ -726,6 +736,9 @@ fun NavGraphBuilder.appNavGraph(
             onManageInsulin = { navController.navigate(AppRoute.InsulinManagement.createRoute()) },
             onManageProfile = { navController.navigate(AppRoute.Profile.createRoute()) },
             onProfileSwitch = { navController.navigate(AppRoute.ProfileActivation.createRoute(0)) },
+            onOpenAuthorizedClients = { navController.navigate(AppRoute.AuthorizedClients.route) },
+            onPairWithMaster = { navController.navigate(AppRoute.PairWithMaster.route) },
+            onOpenNsReceiveSettings = { navController.navigate(AppRoute.PreferenceScreen.createRoute("ns_client_synchronization")) },
             onRunObjectives = {
                 val index = activePlugin.getPluginsList().indexOfFirst { it is Objectives }
                 if (index >= 0) navController.navigate(AppRoute.PluginContent.createRoute(index))

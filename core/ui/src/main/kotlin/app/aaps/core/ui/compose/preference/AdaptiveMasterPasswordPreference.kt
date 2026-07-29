@@ -7,7 +7,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import app.aaps.core.keys.StringKey
 import app.aaps.core.ui.R
 import app.aaps.core.ui.compose.LocalPreferences
@@ -24,6 +23,8 @@ import app.aaps.core.ui.compose.dialogs.SetPasswordDialog
  * @param preferences The Preferences instance
  * @param checkPassword Function to verify password: (enteredPassword, storedHash) -> Boolean
  * @param hashPassword Function to hash password before storing: (password) -> String
+ *
+ * @see AdaptiveMasterPasswordPreferencePreview
  */
 @Composable
 fun AdaptiveMasterPasswordPreferenceItem(
@@ -33,6 +34,7 @@ fun AdaptiveMasterPasswordPreferenceItem(
     showTitle: Boolean = true
 ) {
     val preferences = LocalPreferences.current
+    val clearExportPasswordStore = LocalClearExportPasswordStore.current
     val stringKey = StringKey.ProtectionMasterPassword
 
     val visibility = calculatePreferenceVisibility(
@@ -114,6 +116,9 @@ fun AdaptiveMasterPasswordPreferenceItem(
 
                     password1.isNotEmpty() -> {
                         preferences.put(stringKey, hashPassword(password1))
+                        // Master password changed: drop the stored unattended-export password so exports
+                        // can't keep using the old secret until it expires.
+                        clearExportPasswordStore?.invoke()
                         passwordState = preferences.get(stringKey)
                         onShowMessage(passwordSetMsg)
                         showSetDialog = false
@@ -121,6 +126,7 @@ fun AdaptiveMasterPasswordPreferenceItem(
 
                     preferences.getIfExists(stringKey) != null -> {
                         preferences.remove(stringKey)
+                        clearExportPasswordStore?.invoke()
                         passwordState = ""
                         onShowMessage(passwordClearedMsg)
                         showSetDialog = false
@@ -136,18 +142,6 @@ fun AdaptiveMasterPasswordPreferenceItem(
                 onShowMessage(notChangedMsg)
                 showSetDialog = false
             }
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AdaptiveMasterPasswordPreferencePreview() {
-    PreviewTheme {
-        AdaptiveMasterPasswordPreferenceItem(
-            checkPassword = { _, _ -> false },
-            hashPassword = { it },
-            onShowMessage = { }
         )
     }
 }

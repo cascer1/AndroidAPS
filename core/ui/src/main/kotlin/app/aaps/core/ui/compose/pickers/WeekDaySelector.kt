@@ -9,7 +9,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.aaps.core.ui.elements.WeekDay
 
@@ -19,6 +18,8 @@ import app.aaps.core.ui.elements.WeekDay
  * @param selectedDays Boolean array of size 7 (Mon..Sun) matching [WeekDay.DayOfWeek] ordinals.
  * @param onDayToggle Called with the [WeekDay.DayOfWeek] and new selected state.
  * @param enabled Whether the chips are interactive.
+ *
+ * @see WeekDaySelectorPreview
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -47,16 +48,5 @@ fun WeekDaySelector(
                 }
             )
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun WeekDaySelectorPreview() {
-    MaterialTheme {
-        WeekDaySelector(
-            selectedDays = booleanArrayOf(true, false, true, false, true, false, true),
-            onDayToggle = { _, _ -> }
-        )
     }
 }

@@ -35,13 +35,14 @@ class RoleBranch @Inject constructor(
         masterPrepare: suspend () -> WizardBolusExecutor.PrepareResult
     ): ActionProgress {
         if (config.AAPSCLIENT) {
-            if (!nsClient.masterReachable.value) return ActionProgress.Rejected(FailureReason.NotReachable)
+            if (!nsClient.masterReachable.value) return ActionProgress.Rejected(clientBlockReason())
             return dispatcher.run(clientCommand, label)
         }
         // Master: prepare locally — NO app-level modal (the caller renders the returned lines as the confirmation).
         return when (val r = masterPrepare()) {
-            is WizardBolusExecutor.PrepareResult.Preview -> ActionProgress.Prepared(r.bolusId, r.lines, r.advisorApplies, r.advisorLines)
+            is WizardBolusExecutor.PrepareResult.Preview -> ActionProgress.Prepared(r.bolusId, r.lines, r.advisorApplies, r.advisorLines, r.wizardDetail)
             is WizardBolusExecutor.PrepareResult.Error   -> ActionProgress.Rejected(FailureReason.ExecutionFailed, r.message)
+            WizardBolusExecutor.PrepareResult.NoAction   -> ActionProgress.Rejected(FailureReason.NoAction)
         }
     }
 
@@ -56,7 +57,7 @@ class RoleBranch @Inject constructor(
         masterConfirm: suspend ((String) -> Unit) -> WizardBolusExecutor.ConfirmResult
     ): ActionProgress {
         if (config.AAPSCLIENT) {
-            if (!nsClient.masterReachable.value) return ActionProgress.Rejected(FailureReason.NotReachable)
+            if (!nsClient.masterReachable.value) return ActionProgress.Rejected(clientBlockReason())
             return dispatcher.run(clientCommand, label)
         }
         // Master: deliver the parked dose/bundle locally.
@@ -69,4 +70,13 @@ class RoleBranch @Inject constructor(
             else                                                  -> ActionProgress.Applied
         }
     }
+
+    /**
+     * Why a client request is blocked, when [NsClient.masterReachable] is false. [NsClient.masterControlAllowed]
+     * folds into masterReachable, so here it is the discriminator: the master is reachable but has remote control
+     * turned OFF ([FailureReason.ControlDisabled]) vs. simply unreachable/unpaired ([FailureReason.NotReachable]).
+     * The caller maps the reason to the correct user-facing message (offline vs. control disabled).
+     */
+    private fun clientBlockReason(): FailureReason =
+        if (!nsClient.masterControlAllowed.value) FailureReason.ControlDisabled else FailureReason.NotReachable
 }

@@ -19,7 +19,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.fromHtml
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.ui.R
@@ -34,6 +33,8 @@ import app.aaps.core.ui.R
  * @param iconTint Optional tint color for the icon
  * @param onConfirm Called when OK is clicked
  * @param onDismiss Called when Cancel is clicked or dialog is dismissed
+ *
+ * @see OkCancelDialogPreview
  */
 @Composable
 fun OkCancelDialog(
@@ -170,17 +171,4 @@ fun OkCancelDialog(
         },
         properties = DialogProperties(dismissOnBackPress = true, dismissOnClickOutside = false)
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun OkCancelDialogPreview() {
-    MaterialTheme {
-        OkCancelDialog(
-            title = "Confirmation",
-            message = "Are you sure you want to proceed?",
-            onConfirm = {},
-            onDismiss = {}
-        )
-    }
 }

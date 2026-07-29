@@ -15,7 +15,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.dialogs.OkCancelDialog
@@ -41,8 +40,7 @@ fun RetryActivationStep(
     LaunchedEffect(Unit) {
         if (patchStep == PatchStep.RETRY_ACTIVATION) {
             viewModel.preparePatch()
-        }
-        else if (patchStep == PatchStep.RETRY_ACTIVATION_CONNECT) {
+        } else if (patchStep == PatchStep.RETRY_ACTIVATION_CONNECT) {
             viewModel.retryActivationConnect()
         }
     }
@@ -50,13 +48,13 @@ fun RetryActivationStep(
     LaunchedEffect(setupStep) {
         if (patchStep == PatchStep.RETRY_ACTIVATION_CONNECT) {
             when (setupStep) {
-                MedtrumPatchViewModel.SetupStep.INITIAL   -> Unit
-                MedtrumPatchViewModel.SetupStep.FILLED    -> viewModel.forceMoveStep(PatchStep.SELECT_INSULIN)
-                MedtrumPatchViewModel.SetupStep.PRIMING   -> viewModel.forceMoveStep(PatchStep.PRIMING)
-                MedtrumPatchViewModel.SetupStep.PRIMED    -> viewModel.forceMoveStep(PatchStep.PRIME_COMPLETE)
+                MedtrumPatchViewModel.SetupStep.INITIAL -> Unit
+                MedtrumPatchViewModel.SetupStep.FILLED -> viewModel.forceMoveStep(PatchStep.SELECT_INSULIN)
+                MedtrumPatchViewModel.SetupStep.PRIMING -> viewModel.forceMoveStep(PatchStep.PRIMING)
+                MedtrumPatchViewModel.SetupStep.PRIMED -> viewModel.forceMoveStep(PatchStep.PRIME_COMPLETE)
                 MedtrumPatchViewModel.SetupStep.ACTIVATED -> viewModel.forceMoveStep(PatchStep.ACTIVATE_COMPLETE)
 
-                else                                      -> unexpectedStateMessage = setupStep.toString()
+                else -> unexpectedStateMessage = setupStep.toString()
             }
         }
     }
@@ -92,6 +90,10 @@ fun RetryActivationStep(
     )
 }
 
+/**
+ * @see PreviewRetryPrompt
+ * @see PreviewRetryConnecting
+ */
 @Composable
 internal fun RetryActivationContent(
     isConnecting: Boolean,
@@ -134,21 +136,5 @@ internal fun RetryActivationContent(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-    }
-}
-
-@Preview(showBackground = true, name = "Retry - Prompt")
-@Composable
-private fun PreviewRetryPrompt() {
-    MaterialTheme {
-        RetryActivationContent(isConnecting = false, onRetry = {}, onDiscard = {}, onCancel = {})
-    }
-}
-
-@Preview(showBackground = true, name = "Retry - Connecting")
-@Composable
-private fun PreviewRetryConnecting() {
-    MaterialTheme {
-        RetryActivationContent(isConnecting = true, onRetry = {}, onDiscard = {}, onCancel = {})
     }
 }

@@ -20,37 +20,33 @@ import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.di.ApplicationScope
-import app.aaps.core.interfaces.insulin.Insulin
+import app.aaps.core.interfaces.insulin.ConcentrationHelper
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
 import app.aaps.core.interfaces.logging.UserEntryLogger
 import app.aaps.core.interfaces.nsclient.ProcessedDeviceStatusData
-import app.aaps.core.interfaces.plugin.ActivePlugin
 import app.aaps.core.interfaces.profile.Profile
 import app.aaps.core.interfaces.profile.ProfileFunction
 import app.aaps.core.interfaces.profile.ProfileUtil
 import app.aaps.core.interfaces.pump.DetailedBolusInfo
-import app.aaps.core.interfaces.pump.defs.determineCorrectBolusStepSize
 import app.aaps.core.interfaces.resources.ResourceHelper
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventRefreshOverview
-import app.aaps.core.interfaces.ui.UiInteraction
+import app.aaps.core.interfaces.rx.weardata.EventData
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.utils.Round
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
-import app.aaps.core.objects.extensions.highValueToUnitsToString
-import app.aaps.core.objects.extensions.lowValueToUnitsToString
 import app.aaps.core.objects.extensions.round
 import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.utils.JsonHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import java.text.DecimalFormat
 import java.util.Calendar
 import javax.inject.Inject
 import kotlin.math.abs
@@ -65,7 +61,6 @@ class BolusWizard @Inject constructor(
     private val profileFunction: ProfileFunction,
     private val profileUtil: ProfileUtil,
     private val constraintChecker: ConstraintsChecker,
-    private val activePlugin: ActivePlugin,
     private val loop: Loop,
     private val iobCobCalculator: IobCobCalculator,
     private val dateUtil: DateUtil,
@@ -73,12 +68,10 @@ class BolusWizard @Inject constructor(
     private val uel: UserEntryLogger,
     private val automation: Automation,
     private val glucoseStatusProvider: GlucoseStatusProvider,
-    private val uiInteraction: UiInteraction,
     private val persistenceLayer: PersistenceLayer,
-    private val decimalFormatter: DecimalFormatter,
     private val processedDeviceStatusData: ProcessedDeviceStatusData,
     private val runningModeGuard: RunningModeGuard,
-    private val activeInsulin: Insulin,
+    private val ch: ConcentrationHelper,
     private val wizardBolusExecutor: WizardBolusExecutor,
     @ApplicationScope private val appScope: CoroutineScope
 ) {
@@ -119,6 +112,12 @@ class BolusWizard @Inject constructor(
     // Result
     var calculatedTotalInsulin: Double = 0.0
         private set
+
+    // Raw sum before the negative-total clamp (calculatedTotalInsulin = 0.0 branch); equals
+    // calculatedTotalInsulin when non-negative. Used by the wear correction buttons so they
+    // spend the right number of steps recovering to 0 before going positive.
+    var unclampedCalculatedInsulin: Double = 0.0
+        private set
     var totalBeforePercentageAdjustment: Double = 0.0
         private set
     var carbsEquivalent: Double = 0.0
@@ -155,9 +154,9 @@ class BolusWizard @Inject constructor(
     private var useAlarm = false
     var notes: String = ""
     private var carbTime: Int = 0
-    private var quickWizard: Boolean = true
     var usePercentage: Boolean = false
     var positiveIOBOnly: Boolean = false
+    private var source: Sources = Sources.WizardDialog
 
     suspend fun doCalc(
         profile: Profile,
@@ -180,8 +179,8 @@ class BolusWizard @Inject constructor(
         carbTime: Int = 0,
         usePercentage: Boolean = false,
         totalPercentage: Double = 100.0,
-        quickWizard: Boolean = false,
-        positiveIOBOnly: Boolean = false
+        positiveIOBOnly: Boolean = false,
+        source: Sources = Sources.WizardDialog
     ): BolusWizard {
 
         this.profile = profile
@@ -202,10 +201,10 @@ class BolusWizard @Inject constructor(
         this.useAlarm = useAlarm
         this.notes = notes
         this.carbTime = carbTime
-        this.quickWizard = quickWizard
         this.usePercentage = usePercentage
         this.totalPercentage = totalPercentage
         this.positiveIOBOnly = positiveIOBOnly
+        this.source = source
 
         // Insulin from BG
         sens = profileUtil.fromMgdlToUnits(profile.getIsfMgdlForCarbs(dateUtil.now(), "BolusWizard", config, processedDeviceStatusData))
@@ -238,8 +237,7 @@ class BolusWizard @Inject constructor(
         insulinFromCarbs = carbs / ic
         insulinFromCOB = if (useCob) (cob / ic) else 0.0
 
-        // Insulin from IOB
-        // IOB calculation
+        // Insulin from IOB calculation
         val bolusIob = iobCobCalculator.calculateIobFromBolus().round()
         val basalIob = iobCobCalculator.calculateIobFromTempBasalsIncludingConvertedExtended().round()
 
@@ -273,6 +271,7 @@ class BolusWizard @Inject constructor(
 
         totalBeforePercentageAdjustment = scaledComponents + unscaledComponents
         calculatedTotalInsulin = scaledComponents * percentage / 100.0 + unscaledComponents
+        var preClamp = calculatedTotalInsulin  // save before constraint calcs or negative clamp
 
         // Percentage adjustment
         if (calculatedTotalInsulin >= 0) {
@@ -282,15 +281,19 @@ class BolusWizard @Inject constructor(
                 calcPercentageWithConstraints()
             if (usePercentage)  //Should be updated after calcCorrectionWithConstraints and calcPercentageWithConstraints to have correct synthesis in WizardInfo
                 this.percentageCorrection = Round.roundTo(totalPercentage, 1.0).toInt()
+            preClamp = calculatedTotalInsulin  // update after constraint calcs (may have changed)
         } else {
             carbsEquivalent = (-calculatedTotalInsulin) * ic
             calculatedTotalInsulin = 0.0
             calculatedPercentage = percentageCorrection
             calculatedCorrection = 0.0
+            // preClamp stays as the original negative value
         }
 
-        val bolusStep = activePlugin.activePump.pumpDescription.bolusStep
+        // Amount-aware (Insight) + concentration-adjusted deliverable step, so the rounded value matches the pump grid.
+        val bolusStep = ch.bolusStep(calculatedTotalInsulin)
         calculatedTotalInsulin = Round.roundTo(calculatedTotalInsulin, bolusStep)
+        unclampedCalculatedInsulin = Round.roundTo(preClamp, bolusStep)
 
         insulinAfterConstraints = constraintChecker.applyBolusConstraints(ConstraintObject(calculatedTotalInsulin, aapsLogger)).value()
 
@@ -417,7 +420,7 @@ class BolusWizard @Inject constructor(
                     line(ConfirmationRole.COB, rh.gs(app.aaps.core.ui.R.string.slowabsorptiondetected_plain, (absorptionRate * 100).toInt()))
                 }
             }
-            if (abs(insulinAfterConstraints - calculatedTotalInsulin) > activePlugin.activePump.pumpDescription.pumpType.determineCorrectBolusStepSize(insulinAfterConstraints)) {
+            if (abs(insulinAfterConstraints - calculatedTotalInsulin) > ch.bolusStep(insulinAfterConstraints)) {
                 line(ConfirmationRole.WARNING, rh.gs(app.aaps.core.ui.R.string.bolus_constraint_applied_warn, calculatedTotalInsulin, insulinAfterConstraints))
             }
             if ((config.AAPSCLIENT || forcedRecordOnly) && insulinAfterConstraints > 0) {
@@ -446,6 +449,33 @@ class BolusWizard @Inject constructor(
                 line(ConfirmationRole.INFO, rh.gs(app.aaps.core.ui.R.string.wizard_ecarbs, eCarbsGrams, eCarbsDurationHours, eCarbsDelayMinutes))
             }
         }
+
+    fun buildWizardDetail(): EventData.WizardDetail {
+        val ttLabel = if (useTT && tempTarget != null) {
+            val fmt = DecimalFormat("0.0#")
+            val low = fmt.format(profileUtil.fromMgdlToUnits(tempTarget!!.lowTarget))
+            val high = fmt.format(profileUtil.fromMgdlToUnits(tempTarget!!.highTarget))
+            if (low == high) low else "$low-$high"
+        } else null
+        return EventData.WizardDetail(
+            totalInsulin = calculatedTotalInsulin,
+            unclampedInsulin = unclampedCalculatedInsulin,
+            carbs = carbs,
+            insulinFromBG = insulinFromBG,
+            insulinFromTrend = insulinFromTrend,
+            insulinFromCOB = insulinFromCOB,
+            insulinFromCarbs = insulinFromCarbs,
+            insulinFromBolusIOB = insulinFromBolusIOB,
+            insulinFromBasalIOB = insulinFromBasalIOB,
+            includeBolusIOB = includeBolusIOB,
+            includeBasalIOB = includeBasalIOB,
+            percentageCorrection = percentageCorrection,
+            cob = cob,
+            tempTargetLabel = ttLabel,
+            ic = ic,
+            sens = sens,
+        )
+    }
 
     private fun calcPercentageWithConstraints() {
         calculatedPercentage = 100
@@ -498,7 +528,9 @@ class BolusWizard @Inject constructor(
         if (carbs > 0.0)
             automation.removeAutomationEventEatReminder()
 
-        val profile = profileFunction.getProfile() ?: return
+        // Named to avoid shadowing the `profile` property, which is the profile the dose was computed
+        // against — the two are not interchangeable and were easy to confuse while it was shadowed.
+        val runningProfile = profileFunction.getProfile() ?: return
         val now = dateUtil.now()
 
         if (insulinAfterConstraints > 0 || carbs > 0) {
@@ -508,10 +540,10 @@ class BolusWizard @Inject constructor(
                 if (loop.allowedNextModes().contains(RM.Mode.SUPER_BOLUS)) {
                     loop.handleRunningModeChange(
                         durationInMinutes = 2 * 60,
-                        profile = profile,
+                        profile = runningProfile,
                         newRM = RM.Mode.SUPER_BOLUS,
                         action = Action.SUPERBOLUS_TBR,
-                        source = Sources.WizardDialog
+                        source = source
                     )
                     rxBus.send(EventRefreshOverview("WizardDialog"))
                 }
@@ -521,7 +553,6 @@ class BolusWizard @Inject constructor(
                 carbs == 0                     -> Action.BOLUS
                 else                           -> Action.TREATMENT
             }
-            val source = if (quickWizard) Sources.QuickWizard else Sources.WizardDialog
             val bolusCalculatorResult = createBolusCalculatorResult()
             quickWizardEntry?.markAsUsed()
             // Schedule carb timer before bolus delivery. Scheduling in the bolus completion callback
@@ -541,7 +572,10 @@ class BolusWizard @Inject constructor(
                         ValueWithUnit.Minute(carbTime).takeIf { carbTime != 0 }
                     )
                 )
-                val recordIcfg = this.profile.iCfg ?: activeInsulin.iCfg
+                // The profile the dose was computed against owns the iCfg to record. It is null only for
+                // a ProfileSealed.Pure caller, in which case the running profile — already resolved and
+                // non-null above — is the insulin this bolus is actually being delivered with.
+                val recordIcfg = profile.iCfg ?: runningProfile.iCfg
                 val detailedBolusInfo = DetailedBolusInfo().apply {
                     insulin = insulinAfterConstraints
                     carbs = this@BolusWizard.carbs.toDouble()
@@ -573,7 +607,7 @@ class BolusWizard @Inject constructor(
                     insulin = insulinAfterConstraints,
                     carbs = carbs,
                     carbTimeMinutes = carbTime,
-                    mgdlGlucose = profileUtil.convertToMgdl(bg, this.profile.units),
+                    mgdlGlucose = profileUtil.convertToMgdl(bg, profile.units),
                     bolusCalculatorResult = bolusCalculatorResult,
                     notes = notes,
                     source = source,
@@ -593,65 +627,6 @@ class BolusWizard @Inject constructor(
      * Execute bolus advisor flow (correction-only bolus, no carbs, eat reminder).
      * No UI dependency — errors reported via [onError] callback.
      */
-    suspend fun executeBolusAdvisor(onError: (String) -> Unit, eCarbsGrams: Int = 0, eCarbsDelayMinutes: Int = 0, eCarbsDurationHours: Int = 0, forcedRecordOnly: Boolean = false) {
-        if (accepted) {
-            aapsLogger.debug(LTag.UI, "guarding: already accepted")
-            return
-        }
-        if (!forcedRecordOnly && calculatedTotalInsulin > 0.0 &&
-            runningModeGuard.checkWithSnackbar(PumpCommandGate.CommandKind.BOLUS)
-        ) return
-        accepted = true
-        if (calculatedTotalInsulin > 0.0)
-            automation.removeAutomationEventBolusReminder()
-        if (carbs > 0.0)
-            automation.removeAutomationEventEatReminder()
-
-        if (insulinAfterConstraints > 0) {
-            val source = if (quickWizard) Sources.QuickWizard else Sources.WizardDialog
-            if (forcedRecordOnly) {
-                uel.log(
-                    action = Action.BOLUS_ADVISOR,
-                    source = source,
-                    note = notes,
-                    listValues = listOf(
-                        ValueWithUnit.TEType(TE.Type.CORRECTION_BOLUS),
-                        ValueWithUnit.Insulin(insulinAfterConstraints)
-                    )
-                )
-                val recordIcfg = this.profile.iCfg ?: activeInsulin.iCfg
-                val detailedBolusInfo = DetailedBolusInfo().apply {
-                    eventType = TE.Type.CORRECTION_BOLUS
-                    insulin = insulinAfterConstraints
-                    carbs = 0.0
-                    notes = this@BolusWizard.notes
-                }
-                appScope.launch {
-                    persistenceLayer.insertOrUpdateBolus(
-                        bolus = detailedBolusInfo.createBolus(recordIcfg),
-                        action = Action.BOLUS_ADVISOR,
-                        source = source,
-                        note = rh.gs(app.aaps.core.ui.R.string.record) + if (notes.isNotEmpty()) ": $notes" else ""
-                    )
-                }
-                automation.scheduleAutomationEventEatReminder()
-            } else {
-                // Advisor bolus rides the shared canonical executor entry point (one audited path); the
-                // executor logs the BOLUS_ADVISOR entry, delivers, and schedules the eat reminder on success.
-                wizardBolusExecutor.deliverBolusAdvisor(
-                    insulin = insulinAfterConstraints,
-                    mgdlGlucose = profileUtil.convertToMgdl(bg, this.profile.units),
-                    bolusCalculatorResult = createBolusCalculatorResult(),
-                    notes = notes,
-                    source = source,
-                    onError = onError
-                )
-            }
-        }
-        if (eCarbsGrams > 0) {
-            scheduleECarbs(eCarbsGrams, eCarbsDelayMinutes, eCarbsDurationHours, onError, forcedRecordOnly)
-        }
-    }
 
     private fun scheduleECarbs(eCarbsGrams: Int, delayMinutes: Int, durationHours: Int, onError: (String) -> Unit, forcedRecordOnly: Boolean = false) {
         // delayMinutes is already the total delay from now — the caller folds the meal carbTime into it.

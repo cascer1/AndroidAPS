@@ -49,10 +49,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.graph.profile.ProfileCompareContent
 import app.aaps.core.graph.profile.ProfileSingleContent
 import app.aaps.core.graph.profile.ProfileViewerScreen
@@ -317,11 +317,11 @@ fun AutotuneScreen(
                             icsRows = buildIcRows(profile1, profile2, dateUtil),
                             icUnits = rh.gs(app.aaps.core.ui.R.string.profile_carbs_per_unit),
                             isfsRows = buildIsfRows(profile1, profile2, profileUtil, dateUtil),
-                            isfUnits = "${profileFunction.getUnits().asText} ${rh.gs(app.aaps.core.ui.R.string.profile_per_unit)}",
+                            isfUnits = rh.gs(if (profileFunction.getUnits() == GlucoseUnit.MGDL) app.aaps.core.ui.R.string.profile_isf_units_mgdl else app.aaps.core.ui.R.string.profile_isf_units_mmol),
                             basalsRows = buildBasalRows(profile1, profile2, dateUtil),
                             basalUnits = rh.gs(app.aaps.core.ui.R.string.profile_ins_units_per_hour),
                             targetsRows = buildTargetRows(profile1, profile2, dateUtil, profileUtil),
-                            targetUnits = profileFunction.getUnits().asText,
+                            targetUnits = profileFunction.getUnits().displayLabel,
                             profileName1 = dialog.data.profileName ?: "",
                             profileName2 = dialog.data.profileName2 ?: ""
                         )
@@ -381,8 +381,11 @@ private fun ProfileDropdown(
     }
 }
 
+/**
+ * @see InfoRowPreview
+ */
 @Composable
-private fun InfoRow(
+internal fun InfoRow(
     label: String,
     value: String,
     valueClickable: Boolean = false,
@@ -411,8 +414,11 @@ private fun InfoRow(
     }
 }
 
+/**
+ * @see ResultsTablePreview
+ */
 @Composable
-private fun ResultsTableHeader(isBasal: Boolean) {
+internal fun ResultsTableHeader(isBasal: Boolean) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -431,7 +437,7 @@ private fun ResultsTableHeader(isBasal: Boolean) {
 }
 
 @Composable
-private fun ResultsTableRow(row: ResultRow) {
+internal fun ResultsTableRow(row: ResultRow) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -449,8 +455,11 @@ private fun ResultsTableRow(row: ResultRow) {
     }
 }
 
+/**
+ * @see AutotuneButtonPreview
+ */
 @Composable
-private fun AutotuneButton(
+internal fun AutotuneButton(
     text: String,
     icon: ImageVector,
     modifier: Modifier = Modifier,
@@ -476,40 +485,3 @@ private fun AutotuneButton(
 }
 
 // --- Previews ---
-
-@Preview(showBackground = true)
-@Composable
-private fun ResultsTablePreview() {
-    MaterialTheme {
-        Column {
-            ResultsTableHeader(isBasal = false)
-            ResultsTableRow(ResultRow("ISF", "5.0", "4.8", "-4%"))
-            ResultsTableRow(ResultRow("IC", "10.0", "9.5", "-5%"))
-            ResultsTableHeader(isBasal = true)
-            ResultsTableRow(ResultRow("00:00", "0.800", "0.900", "13%", "2"))
-            ResultsTableRow(ResultRow("∑", "19.200", "20.100", "5%", " "))
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AutotuneButtonPreview() {
-    MaterialTheme {
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            AutotuneButton("Run Autotune", Icons.Filled.PlayArrow, Modifier.weight(1f)) {}
-            AutotuneButton("Compare profiles", Icons.AutoMirrored.Filled.CompareArrows, Modifier.weight(1f)) {}
-        }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun InfoRowPreview() {
-    MaterialTheme {
-        Column {
-            InfoRow(label = "Last run :", value = "2026-04-08 10:00", valueClickable = true, onValueClick = {})
-            InfoRow(label = "Warning :", value = "Check the results carefully!")
-        }
-    }
-}

@@ -1,15 +1,9 @@
 package app.aaps.core.ui.compose.icons
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
@@ -19,6 +13,8 @@ import androidx.compose.ui.unit.dp
  * Replacing ic_patch_pump_outline
  *
  * Viewport: 80x80
+ *
+ * @see IcPatchPumpPreview
  */
 val IcPatchPump: ImageVector by lazy {
     ImageVector.Builder(
@@ -52,17 +48,4 @@ val IcPatchPump: ImageVector by lazy {
             arcTo(22f, 22f, 0f, false, true, 67f, 40f)
         }
     }.build()
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun IcPatchPumpPreview() {
-    Icon(
-        imageVector = IcPatchPump,
-        contentDescription = null,
-        modifier = Modifier
-            .padding(0.dp)
-            .size(48.dp),
-        tint = Color.Unspecified
-    )
 }

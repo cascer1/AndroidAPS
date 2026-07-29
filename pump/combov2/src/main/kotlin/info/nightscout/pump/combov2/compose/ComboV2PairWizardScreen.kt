@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.pump.BluetoothPermissionsHost
@@ -119,8 +118,11 @@ private fun WizardBody(
     }
 }
 
+/**
+ * @see DriverNotInitializedSectionPreview
+ */
 @Composable
-private fun DriverNotInitializedSection(onGoBack: () -> Unit) {
+internal fun DriverNotInitializedSection(onGoBack: () -> Unit) {
     WizardStepLayout(
         primaryButton = WizardButton(
             text = stringResource(R.string.combov2_go_back),
@@ -134,8 +136,11 @@ private fun DriverNotInitializedSection(onGoBack: () -> Unit) {
     }
 }
 
+/**
+ * @see IdleSectionPreview
+ */
 @Composable
-private fun IdleSection(onStartPairing: () -> Unit) {
+internal fun IdleSection(onStartPairing: () -> Unit) {
     WizardStepLayout(
         primaryButton = WizardButton(
             text = stringResource(R.string.combov2_start_pairing),
@@ -149,8 +154,12 @@ private fun IdleSection(onStartPairing: () -> Unit) {
     }
 }
 
+/**
+ * @see InProgressScanningPreview
+ * @see InProgressPinEntryPreview
+ */
 @Composable
-private fun InProgressSection(
+internal fun InProgressSection(
     state: ComboV2PairWizardUiState,
     onPinTextChange: (String) -> Unit,
     onSubmitPin: () -> Boolean,
@@ -165,7 +174,9 @@ private fun InProgressSection(
         Text(
             text = stringResource(R.string.combov2_pairing_in_progress),
             style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.fillMaxWidth().align(Alignment.CenterHorizontally)
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.CenterHorizontally)
         )
 
         Text(
@@ -245,8 +256,11 @@ private fun PinEntrySection(
     }
 }
 
+/**
+ * @see ConfirmCancelSectionPreview
+ */
 @Composable
-private fun ConfirmCancelSection(
+internal fun ConfirmCancelSection(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -267,8 +281,11 @@ private fun ConfirmCancelSection(
     }
 }
 
+/**
+ * @see FinishedSectionPreview
+ */
 @Composable
-private fun FinishedSection(onOk: () -> Unit) {
+internal fun FinishedSection(onOk: () -> Unit) {
     WizardStepLayout(
         primaryButton = WizardButton(
             text = stringResource(app.aaps.core.ui.R.string.ok),
@@ -283,8 +300,11 @@ private fun FinishedSection(onOk: () -> Unit) {
     }
 }
 
+/**
+ * @see AbortedSectionPreview
+ */
 @Composable
-private fun AbortedSection(reason: String, onOk: () -> Unit) {
+internal fun AbortedSection(reason: String, onOk: () -> Unit) {
     WizardStepLayout(
         primaryButton = WizardButton(
             text = stringResource(app.aaps.core.ui.R.string.ok),
@@ -300,8 +320,11 @@ private fun AbortedSection(reason: String, onOk: () -> Unit) {
     }
 }
 
+/**
+ * @see PermissionsDeniedSectionPreview
+ */
 @Composable
-private fun PermissionsDeniedSection(
+internal fun PermissionsDeniedSection(
     onRetry: () -> Unit,
     onGoBack: () -> Unit
 ) {
@@ -325,84 +348,3 @@ private fun PermissionsDeniedSection(
 // ── Previews ──────────────────────────────────────────────────────────────
 // Wrapped in plain MaterialTheme (not AapsTheme) because AapsTheme depends on
 // LocalPreferences, which is not provided in preview contexts.
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun IdleSectionPreview() {
-    MaterialTheme { IdleSection(onStartPairing = {}) }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun InProgressScanningPreview() {
-    MaterialTheme {
-        InProgressSection(
-            state = ComboV2PairWizardUiState(
-                phase = PairWizardPhase.InProgress,
-                stepDescription = "Scanning for pump",
-                overallProgress = 0.1f,
-                scanningIndeterminate = true,
-                pinEntryVisible = false
-            ),
-            onPinTextChange = {},
-            onSubmitPin = { true },
-            onRequestCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun InProgressPinEntryPreview() {
-    MaterialTheme {
-        InProgressSection(
-            state = ComboV2PairWizardUiState(
-                phase = PairWizardPhase.InProgress,
-                stepDescription = "Pump requests PIN",
-                overallProgress = 0.6f,
-                scanningIndeterminate = false,
-                pinEntryVisible = true,
-                pinText = "1234567",
-                pinFailed = true
-            ),
-            onPinTextChange = {},
-            onSubmitPin = { true },
-            onRequestCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun ConfirmCancelSectionPreview() {
-    MaterialTheme { ConfirmCancelSection(onConfirm = {}, onDismiss = {}) }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun FinishedSectionPreview() {
-    MaterialTheme { FinishedSection(onOk = {}) }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun AbortedSectionPreview() {
-    MaterialTheme {
-        AbortedSection(
-            reason = "Pairing failed due to error: example error",
-            onOk = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun DriverNotInitializedSectionPreview() {
-    MaterialTheme { DriverNotInitializedSection(onGoBack = {}) }
-}
-
-@Preview(showBackground = true, heightDp = 640)
-@Composable
-private fun PermissionsDeniedSectionPreview() {
-    MaterialTheme { PermissionsDeniedSection(onRetry = {}, onGoBack = {}) }
-}

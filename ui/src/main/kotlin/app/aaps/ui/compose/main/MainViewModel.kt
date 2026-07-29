@@ -19,6 +19,7 @@ import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.bolus.WizardExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.FailureReason
+import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.constraints.ConstraintsChecker
@@ -54,6 +55,7 @@ import app.aaps.core.interfaces.utils.fabric.FabricPrivacy
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.interfaces.Preferences
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.objects.constraints.ConstraintObject
 import app.aaps.core.objects.extensions.toStringFull
 import app.aaps.core.objects.wizard.QuickWizard
@@ -124,6 +126,7 @@ class MainViewModel @Inject constructor(
     private val activeSceneManager: ActiveSceneSync,
     private val rxBus: RxBus,
     private val nsClient: NsClient,
+    private val visibilityContext: VisibilityContext,
     @ApplicationScope private val appScope: CoroutineScope
 ) : ViewModel() {
 
@@ -139,20 +142,35 @@ class MainViewModel @Inject constructor(
      */
     val masterReachable: StateFlow<Boolean> = nsClient.masterReachable
 
+    /**
+     * AAPSCLIENT-only STABLE pairing signal — always true on a master, on a client true once paired.
+     * Drives HIDING of the mutating nav buttons (Treatments + Scenes): an unpaired client cannot command
+     * the master, so those entry points are removed entirely (not merely disabled like [masterReachable]).
+     * It flips only on an explicit pair/unpair, so it is safe to drive persistent chrome without the
+     * flapping [masterReachable] exhibits.
+     */
+    val masterOrPairedClient: StateFlow<Boolean> = nsClient.masterOrPairedClientFlow
+
     /** Toolbar items as a separate StateFlow to avoid unnecessary recompositions of the main UI */
     private val _quickLaunchItems = MutableStateFlow<List<ResolvedQuickLaunchItem>>(emptyList())
 
     /**
-     * Public toolbar items, gated by [masterReachable]: scene-action items disable when WS is
-     * down on AAPSCLIENT. The resolver only sees local catalog state, so the dynamic
-     * reachability check has to layer on here. Non-scene items pass through unchanged.
+     * Public toolbar items. Two layered gates: (1) mode VISIBILITY — actions whose backing element isn't visible
+     * now (e.g. MASTER_OR_PAIRED_CLIENT on an unpaired client) are HIDDEN, the same ElementVisibility gate the
+     * QuickLaunch config + search use, so a pre-pinned bolus/carbs/scene drops off an unpaired client's toolbar;
+     * (2) reachability — scene-action items DISABLE (not hide) while WS is down on AAPSCLIENT. The resolver only
+     * sees local catalog state, so both checks layer on here.
      */
     val quickLaunchItems: StateFlow<List<ResolvedQuickLaunchItem>> =
-        combine(_quickLaunchItems, masterReachable) { items, reachable ->
-            if (reachable) items
-            else items.map { item ->
-                if (item.action is QuickLaunchAction.SceneAction) item.copy(enabled = false) else item
-            }
+        combine(_quickLaunchItems, masterReachable, masterOrPairedClient) { items, reachable, _ ->
+            items
+                // (1) Hide mode-gated actions. masterOrPairedClient is combined in only to re-emit on a pairing
+                // flip; the predicate reads the current state through visibilityContext.
+                .filter { it.action.elementType?.visibility?.isVisible(visibilityContext) ?: true }
+                // (2) Scene actions disable while the master is transiently unreachable.
+                .map { item ->
+                    if (!reachable && item.action is QuickLaunchAction.SceneAction) item.copy(enabled = false) else item
+                }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     /** Pending confirmation dialog (automation/TT preset actions) */
@@ -456,8 +474,8 @@ class MainViewModel @Inject constructor(
                 }
             // A master-local compute failure (no modal) or a client offline pre-check surfaces here; a client round-trip failure already showed on the app modal.
             is ActionProgress.Rejected ->
-                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(prepared.reason.failTextResId())))
 
             else                       -> Unit // Unconfirmed → app modal
         }
@@ -469,21 +487,25 @@ class MainViewModel @Inject constructor(
      * master's exact lines (the contract), then commits. INSULIN now has the client route it previously lacked.
      */
     private suspend fun executeFixedBatch(entry: QuickWizardEntry, actions: List<BatchAction>, label: String, icon: ImageVector) {
-        when (val prepared = batchExecutor.prepare(actions, Sources.QuickWizard, label)) {
+        // Tag the bolus action with the originating QuickWizard guid so the MASTER marks the entry used on a successful
+        // commit (lastUsed cooldown) and republishes it to clients — the master is SOT. The client must NOT call
+        // markAsUsed itself: that writes the Bidirectional QuickWizard pref, which a paired client would push back over
+        // the signed round-trip and collide with this commit → "Update settings … Another action is already in progress".
+        val tagged = actions.map { if (it is BatchAction.Bolus) it.copy(quickWizardGuid = entry.guid()) else it }
+        when (val prepared = batchExecutor.prepare(tagged, Sources.QuickWizard, label)) {
             is ActionProgress.Prepared ->
                 rxBus.send(
                     EventShowDialog.OkCancel(
                         title = entry.buttonText(), message = "", confirmationLines = prepared.lines, icon = icon,
                         onOk = {
                             appScope.launch { batchExecutor.commit(prepared.id, Sources.QuickWizard, label) }
-                            entry.markAsUsed()
                         }
                     )
                 )
             // A master-local failure (no modal) or a client offline pre-check surfaces here; a client round-trip failure already showed on the app modal.
             is ActionProgress.Rejected ->
-                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                    rxBus.send(EventShowDialog.Ok(title = entry.buttonText(), message = prepared.detail ?: rh.gs(prepared.reason.failTextResId())))
 
             else                       -> Unit // Unconfirmed → app modal
         }
@@ -504,9 +526,16 @@ class MainViewModel @Inject constructor(
     private suspend fun executeCarbsMode(entry: QuickWizardEntry) {
         val carbs = entry.carbs()
         if (carbs <= 0) return
+        val hasEcarbs = entry.useEcarbs() == QuickWizardEntry.YES
         executeFixedBatch(
             entry,
-            listOf(BatchAction.Bolus(insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0, recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null)),
+            listOf(BatchAction.Bolus(
+                insulin = 0.0, carbs = carbs, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null,
+                eCarbsGrams = if (hasEcarbs) entry.carbs2() else 0,
+                eCarbsDelayMinutes = if (hasEcarbs) entry.time() else 0,
+                eCarbsDurationHours = if (hasEcarbs) entry.duration() else 0
+            )),
             rh.gs(app.aaps.core.ui.R.string.carbs),
             IcCarbs
         )
@@ -639,8 +668,8 @@ class MainViewModel @Inject constructor(
                     )
 
                 is ActionProgress.Rejected ->
-                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                        rxBus.send(EventShowDialog.Ok(title = rh.gs(app.aaps.core.ui.R.string.temporary_target), message = prepared.detail ?: rh.gs(prepared.reason.failTextResId())))
 
                 else                       -> Unit
             }
@@ -657,8 +686,8 @@ class MainViewModel @Inject constructor(
                     rxBus.send(EventShowDialog.OkCancel(title = label, message = "", confirmationLines = prepared.lines, icon = IcProfile, onOk = { appScope.launch { batchExecutor.commit(prepared.id, Sources.ProfileSwitchDialog, label) } }))
 
                 is ActionProgress.Rejected ->
-                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                        rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                        rxBus.send(EventShowDialog.Ok(title = label, message = prepared.detail ?: rh.gs(prepared.reason.failTextResId())))
 
                 else                       -> Unit
             }
@@ -669,16 +698,19 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val activeTb = persistenceLayer.getTemporaryBasalActiveAt(dateUtil.now())
             val profile = profileFunction.getProfile()
-            val message = if (activeTb != null && profile != null)
-                activeTb.toStringFull(profile, dateUtil, rh)
-            else
-                rh.gs(app.aaps.ui.R.string.no_temp_basal_running)
-            rxBus.send(
-                EventShowDialog.Ok(
-                    title = rh.gs(app.aaps.core.ui.R.string.temp_basal),
-                    message = message
-                )
-            )
+            val title: String
+            val message: String
+            if (activeTb != null && profile != null) {
+                title = rh.gs(app.aaps.core.ui.R.string.temp_basal)
+                message = activeTb.toStringFull(profile, dateUtil, rh)
+            } else {
+                title = rh.gs(app.aaps.core.ui.R.string.base_basal_rate_label)
+                message = if (profile != null)
+                    rh.gs(app.aaps.core.ui.R.string.pump_base_basal_rate, profile.getBasal())
+                else
+                    rh.gs(app.aaps.ui.R.string.no_temp_basal_running)
+            }
+            rxBus.send(EventShowDialog.Ok(title = title, message = message))
         }
     }
 
@@ -739,8 +771,8 @@ class MainViewModel @Inject constructor(
                     )
 
                 is ActionProgress.Rejected ->
-                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable)
-                        rxBus.send(EventShowDialog.Ok(title = title, message = prepared.detail ?: rh.gs(app.aaps.core.ui.R.string.clientcontrol_fail_not_reachable)))
+                    if (!config.AAPSCLIENT || prepared.reason == FailureReason.NotReachable || prepared.reason == FailureReason.ControlDisabled)
+                        rxBus.send(EventShowDialog.Ok(title = title, message = prepared.detail ?: rh.gs(prepared.reason.failTextResId())))
 
                 else                       -> Unit
             }

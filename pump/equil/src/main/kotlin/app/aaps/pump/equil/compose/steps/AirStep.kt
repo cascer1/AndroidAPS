@@ -9,7 +9,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.banner.ErrorBanner
@@ -37,8 +36,13 @@ internal fun AirStep(
     )
 }
 
+/**
+ * @see AirStepPreview
+ * @see AirStepDonePreview
+ * @see AirStepErrorPreview
+ */
 @Composable
-private fun AirStepContent(
+internal fun AirStepContent(
     isLoading: Boolean,
     errorMessage: String?,
     airRemovalDone: Boolean,
@@ -81,43 +85,4 @@ private fun AirStepContent(
             ErrorBanner(message = errorMessage)
         }
     }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AirStepPreview() {
-    AirStepContent(
-        isLoading = false,
-        errorMessage = null,
-        airRemovalDone = false,
-        onRemoveAir = {},
-        onFinish = {},
-        onCancel = {}
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AirStepDonePreview() {
-    AirStepContent(
-        isLoading = false,
-        errorMessage = null,
-        airRemovalDone = true,
-        onRemoveAir = {},
-        onFinish = {},
-        onCancel = {}
-    )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AirStepErrorPreview() {
-    AirStepContent(
-        isLoading = false,
-        errorMessage = "Communication error",
-        airRemovalDone = false,
-        onRemoveAir = {},
-        onFinish = {},
-        onCancel = {}
-    )
 }

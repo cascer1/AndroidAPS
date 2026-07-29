@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,8 +43,12 @@ fun LargeClock(
     LargeClockText(timeText = timeText, agoText = agoText, maxFontSize = maxFontSize, modifier = modifier)
 }
 
+/**
+ * @see LargeClockPreview
+ * @see LargeClockNoAgoPreview
+ */
 @Composable
-private fun LargeClockText(
+internal fun LargeClockText(
     timeText: String,
     agoText: String,
     maxFontSize: TextUnit = 56.sp,
@@ -66,20 +69,4 @@ private fun LargeClockText(
         maxLines = 1,
         modifier = modifier.padding(horizontal = 8.dp)
     )
-}
-
-@Preview(showBackground = true, widthDp = 220)
-@Composable
-private fun LargeClockPreview() {
-    MaterialTheme {
-        LargeClockText(timeText = "14:27", agoText = "(-5)")
-    }
-}
-
-@Preview(showBackground = true, widthDp = 220)
-@Composable
-private fun LargeClockNoAgoPreview() {
-    MaterialTheme {
-        LargeClockText(timeText = "14:27", agoText = "")
-    }
 }

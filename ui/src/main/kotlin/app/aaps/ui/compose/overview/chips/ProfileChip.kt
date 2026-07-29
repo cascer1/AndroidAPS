@@ -19,12 +19,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.tooling.preview.Preview
+import app.aaps.core.interfaces.navigation.ElementType
 import app.aaps.core.ui.compose.AapsSpacing
 import app.aaps.core.ui.compose.AapsTheme
-import app.aaps.core.ui.compose.navigation.ElementType
 import app.aaps.core.ui.compose.navigation.icon
 
+/**
+ * @see ProfileChipPreview
+ * @see ProfileChipModifiedPreview
+ */
 @Composable
 fun ProfileChip(
     profileName: String,
@@ -33,7 +36,8 @@ fun ProfileChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     sceneManaged: Boolean = false,
-    isNoProfile: Boolean = false
+    isNoProfile: Boolean = false,
+    enabled: Boolean = true
 ) {
     val containerColor = when {
         isNoProfile -> MaterialTheme.colorScheme.errorContainer
@@ -49,6 +53,7 @@ fun ProfileChip(
 
     Surface(
         onClick = { haptic.performHapticFeedback(HapticFeedbackType.LongPress); onClick() },
+        enabled = enabled,
         shape = RoundedCornerShape(AapsSpacing.chipCornerRadius),
         color = containerColor,
         modifier = modifier
@@ -90,31 +95,5 @@ fun ProfileChip(
                 )
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileChipPreview() {
-    MaterialTheme {
-        ProfileChip(
-            profileName = "Default 5.6",
-            isModified = false,
-            progress = 0f,
-            onClick = {}
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun ProfileChipModifiedPreview() {
-    MaterialTheme {
-        ProfileChip(
-            profileName = "Default 5.6 *",
-            isModified = true,
-            progress = 0.6f,
-            onClick = {}
-        )
     }
 }

@@ -40,9 +40,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
+/**
+ * @see TextFieldPreferencePreview
+ */
 @Composable
 fun <T> TextFieldPreference(
     state: MutableState<T>,
@@ -146,20 +148,6 @@ fun <T> TextFieldPreference(
             }
             LaunchedEffect(focusRequester) { focusRequester.requestFocus() }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun TextFieldPreferencePreview() {
-    PreviewTheme {
-        TextFieldPreference(
-            value = "Hello",
-            onValueChange = {},
-            title = { Text("Username") },
-            textToValue = { it },
-            summary = { Text("Hello") }
-        )
     }
 }
 

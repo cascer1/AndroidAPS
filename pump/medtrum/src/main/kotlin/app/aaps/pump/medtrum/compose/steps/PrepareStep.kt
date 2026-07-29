@@ -16,7 +16,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.banner.ErrorBanner
@@ -104,6 +103,11 @@ fun PrepareStep(
 
 internal enum class PrepareState { INITIAL, CONNECTING, FILLED, ERROR }
 
+/**
+ * @see PreviewInitial
+ * @see PreviewFilled
+ * @see PreviewError
+ */
 @Composable
 internal fun PrepareStepContent(
     state: PrepareState,
@@ -175,32 +179,5 @@ internal fun PrepareStepContent(
                 }
             }
         }
-    }
-}
-
-@Preview(showBackground = true, name = "Prepare - Initial")
-@Composable
-private fun PreviewInitial() {
-    MaterialTheme {
-        PrepareStepContent(
-            state = PrepareState.INITIAL,
-            onNext = {}, onFilled = {}, onRetry = {}, onCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Prepare - Filled")
-@Composable
-private fun PreviewFilled() {
-    MaterialTheme {
-        PrepareStepContent(state = PrepareState.FILLED, reservoirLevel = 185.0, onNext = {}, onFilled = {}, onRetry = {}, onCancel = {})
-    }
-}
-
-@Preview(showBackground = true, name = "Prepare - Error")
-@Composable
-private fun PreviewError() {
-    MaterialTheme {
-        PrepareStepContent(state = PrepareState.ERROR, pumpState = "STOPPED", onNext = {}, onFilled = {}, onRetry = {}, onCancel = {})
     }
 }

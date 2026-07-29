@@ -13,11 +13,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
-import app.aaps.core.keys.StringKey
-import app.aaps.core.keys.interfaces.PreferenceVisibilityContext
 import app.aaps.core.keys.interfaces.StringPreferenceKey
 import app.aaps.core.keys.interfaces.StringValidator
+import app.aaps.core.keys.interfaces.VisibilityContext
 
 /**
  * Composable string preference for use inside card sections.
@@ -25,6 +23,8 @@ import app.aaps.core.keys.interfaces.StringValidator
  * @param titleResId Optional title resource ID. If 0 or not provided, uses stringKey.titleResId
  * @param summaryResId Optional summary resource ID. If null, uses stringKey.summaryResId
  * @param visibilityContext Optional context for evaluating runtime visibility/enabled conditions
+ *
+ * @see AdaptiveStringPreferencePreview
  */
 @Composable
 fun AdaptiveStringPreferenceItem(
@@ -32,7 +32,7 @@ fun AdaptiveStringPreferenceItem(
     titleResId: Int = 0,
     summaryResId: Int? = null,
     isPassword: Boolean = false,
-    visibilityContext: PreferenceVisibilityContext? = null
+    visibilityContext: VisibilityContext? = null
 ) {
     val effectiveTitleResId = if (titleResId != 0) titleResId else stringKey.titleResId
     val effectiveSummaryResId = summaryResId ?: stringKey.summaryResId
@@ -97,16 +97,6 @@ fun AdaptiveStringPreferenceItem(
             TextFieldPreferenceDefaults.TextField
         }
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun AdaptiveStringPreferencePreview() {
-    PreviewTheme {
-        AdaptiveStringPreferenceItem(
-            stringKey = StringKey.GeneralPatientName
-        )
-    }
 }
 
 /**

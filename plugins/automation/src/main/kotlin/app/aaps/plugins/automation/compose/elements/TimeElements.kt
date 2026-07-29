@@ -27,12 +27,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import java.util.Calendar
 
+/**
+ * @see PreviewTime
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputTimeEditor(
@@ -61,6 +63,9 @@ fun InputTimeEditor(
     }
 }
 
+/**
+ * @see PreviewTimeRange
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun InputTimeRangeEditor(
@@ -174,22 +179,3 @@ private fun formatHHmm(hour: Int, minute: Int): String = "%02d:%02d".format(hour
 
 private fun formatDate(cal: Calendar): String =
     "%04d-%02d-%02d".format(cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH))
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewTime() {
-    MaterialTheme {
-        var m by remember { mutableStateOf(8 * 60 + 30) }
-        InputTimeEditor(minutesSinceMidnight = m, onChange = { m = it })
-    }
-}
-
-@Preview(showBackground = true, widthDp = 360)
-@Composable
-private fun PreviewTimeRange() {
-    MaterialTheme {
-        var s by remember { mutableStateOf(8 * 60) }
-        var e by remember { mutableStateOf(20 * 60) }
-        InputTimeRangeEditor(startMinutes = s, endMinutes = e, onChangeStart = { s = it }, onChangeEnd = { e = it })
-    }
-}

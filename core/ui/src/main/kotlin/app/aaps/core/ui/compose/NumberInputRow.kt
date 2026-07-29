@@ -31,12 +31,10 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.aaps.core.ui.R
 import java.text.DecimalFormat
 import kotlin.math.roundToInt
-import app.aaps.core.keys.R as KeysR
 
 /**
  * Composable that displays a numeric input as a TextField with +/- icon buttons.
@@ -62,6 +60,12 @@ import app.aaps.core.keys.R as KeysR
  * @param decimalPlaces Number of decimal places for value display (0 = integer, default). Ignored if valueFormat is set.
  * @param enabled Whether the input is interactive
  * @param modifier Modifier for the root Column container
+ *
+ * @see NumberInputRowBasicPreview
+ * @see NumberInputRowWithUnitPreview
+ * @see NumberInputRowMinutesPreview
+ * @see NumberInputRowPercentPreview
+ * @see NumberInputRowMinutesDirectPreview
  */
 @Composable
 fun NumberInputRow(
@@ -79,6 +83,7 @@ fun NumberInputRow(
     decimalPlaces: Int = 0,
     enabled: Boolean = true,
     compact: Boolean = false,
+    displayValue: String? = null,
 ) {
     val effectiveValueFormat = valueFormat ?: remember(decimalPlaces) {
         if (decimalPlaces == 0) DecimalFormat("0")
@@ -188,20 +193,23 @@ fun NumberInputRow(
                     textFieldValue = newValue
                     val cleaned = newValue.text.trim().replace(",", ".")
                     when {
-                        cleaned.isEmpty()                  -> {
+                        cleaned.isEmpty()                 -> {
                             // Defer publishing until focus loss — avoids a transient 0 while the
                             // user is mid-deletion and about to retype.
                             isError = false
                         }
-                        cleaned.toDoubleOrNull() == null   -> {
+
+                        cleaned.toDoubleOrNull() == null  -> {
                             isError = true
                             errorMessage = errorInvalidNumber
                         }
-                        cleaned.toDouble() !in valueRange  -> {
+
+                        cleaned.toDouble() !in valueRange -> {
                             isError = true
                             errorMessage = rangeText
                         }
-                        else                               -> {
+
+                        else                              -> {
                             isError = false
                             onValueChange(cleaned.toDouble())
                         }
@@ -254,9 +262,10 @@ fun NumberInputRow(
                         color = if (isError) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    if (showFormattedDisplay && !isError) {
+                    val rightText = displayValue ?: formattedDisplay.takeIf { showFormattedDisplay }
+                    if (rightText != null && !isError) {
                         Text(
-                            text = formattedDisplay,
+                            text = rightText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.primary
                         )
@@ -290,72 +299,3 @@ fun NumberInputRow(
 }
 
 // --- Previews ---
-
-@Preview(showBackground = true)
-@Composable
-private fun NumberInputRowBasicPreview() {
-    MaterialTheme {
-        NumberInputRow(labelResId = R.string.carbs, value = 20.0, onValueChange = {}, valueRange = 0.0..100.0, step = 1.0)
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun NumberInputRowWithUnitPreview() {
-    MaterialTheme {
-        NumberInputRow(
-            labelResId = R.string.insulin_label,
-            value = 3.5,
-            onValueChange = {},
-            valueRange = 0.0..10.0,
-            step = 0.1,
-            decimalPlaces = 1,
-            unitLabel = "U"
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun NumberInputRowMinutesPreview() {
-    MaterialTheme {
-        NumberInputRow(
-            labelResId = R.string.duration,
-            value = 130.0,
-            onValueChange = {},
-            valueRange = 0.0..300.0,
-            step = 10.0,
-            unitLabelResId = KeysR.string.units_min
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun NumberInputRowPercentPreview() {
-    MaterialTheme {
-        NumberInputRow(
-            labelResId = R.string.duration,
-            value = 100.0,
-            onValueChange = {},
-            valueRange = 10.0..200.0,
-            step = 5.0,
-            unitLabelResId = KeysR.string.units_percent
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun NumberInputRowMinutesDirectPreview() {
-    MaterialTheme {
-        NumberInputRow(
-            labelResId = R.string.duration,
-            value = 130.0,
-            onValueChange = {},
-            valueRange = 0.0..300.0,
-            step = 10.0,
-            unitLabelResId = KeysR.string.units_min
-        )
-    }
-}

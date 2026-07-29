@@ -2,6 +2,8 @@ package app.aaps.core.interfaces.bolus
 
 import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.model.RM
+import app.aaps.core.data.model.TE
+import app.aaps.core.data.ue.Sources
 
 /**
  * One action in a multi-action batch ([WizardBolusExecutor.prepareBatch]) — the dose/carbs a dialog submits
@@ -15,6 +17,9 @@ sealed interface BatchAction {
      * A FIXED bolus/carbs (capped, never recomputed). [recordOnly] persists it without a pump command (a pen
      * bolus the user gave outside AAPS) — and is **not** constraint-capped (a record of what was given). [iCfg]
      * is the logged insulin's config for the record-only case; null for a delivery (the master uses its active).
+     * [quickWizardGuid] tags an INSULIN/CARBS QuickWizard batch with the originating entry so the MASTER marks it
+     * used on a successful commit (lastUsed cooldown) — the master is SOT and republishes it; the client never
+     * writes the synced QuickWizard pref itself. Null for a dialog/wear batch (those don't carry a QuickWizard).
      */
     data class Bolus(
         val insulin: Double,
@@ -24,7 +29,11 @@ sealed interface BatchAction {
         val recordOnly: Boolean,
         val notes: String,
         val timestamp: Long,
-        val iCfg: ICfg?
+        val iCfg: ICfg?,
+        val eCarbsGrams: Int = 0,
+        val eCarbsDelayMinutes: Int = 0,
+        val eCarbsDurationHours: Int = 0,
+        val quickWizardGuid: String? = null
     ) : BatchAction
 
     /**
@@ -45,13 +54,19 @@ sealed interface BatchAction {
      * [profileName] null → switch the **currently active** profile (wear / CPP); non-null → switch to that
      * **named** profile from the master's profile store. The master resolves the store by name, so a client can
      * relay a named switch the master executes. [notes] is an optional user note.
+     *
+     * [iCfg] is the insulin to stamp on the resulting switch, supplied by callers that asked the user —
+     * the pump fill/prime and activation flows. Leave it null and the master resolves the insulin in
+     * force (running profile, else a pending switch); if neither exists the batch is refused at prepare,
+     * because the insulin list is a catalogue to choose from, never a source of "the current one".
      */
     data class ProfileSwitch(
         val percentage: Int,
         val timeShiftHours: Int,
         val durationMinutes: Int,
         val profileName: String? = null,
-        val notes: String? = null
+        val notes: String? = null,
+        val iCfg: ICfg? = null
     ) : BatchAction
 
     /**
@@ -94,4 +109,41 @@ sealed interface BatchAction {
      * authoritative for the profile it re-applies. ≤1 per batch. Mirrors [ProfileSwitch] (a config activation).
      */
     data class InsulinActivate(val iCfg: ICfg) : BatchAction
+
+    /**
+     * A careportal therapy event (BG check, note, exercise, sensor/site/cartridge change, …): metadata the
+     * master persists (it is the SOLE writer) and that syncs back to the client via NS treatments. Carries no
+     * dose; applied independently in [WizardBolusExecutor.prepareBatch]/confirm. [glucoseMgdl] is canonical
+     * mg/dL (the master sanity-clamps it). Unlike the ≤1 action types, the executor handles these as a list
+     * (defensive — clients currently send one event per batch).
+     */
+    data class TherapyEvent(
+        val teType: TE.Type,
+        val timestamp: Long,
+        val glucoseMgdl: Double? = null,
+        val glucoseType: TE.MeterType? = null,
+        val durationMinutes: Int = 0,
+        val note: String? = null,
+        val location: TE.Location? = null,
+        val arrow: TE.Arrow? = null,
+        // Audit source used as the prepare/commit source on the SENDING device. A relayed (client→master) event is
+        // logged by the master as Sources.NSClient; the master does not read this off the wire (see applyTherapyEvent).
+        val source: Sources
+    ) : BatchAction
+
+    /**
+     * An EDIT of an existing therapy event's metadata (location / arrow / note) — the management screen's inline edit.
+     * Unlike [TherapyEvent] (create, insert-if-new), the master LOCATES its own copy by [timestamp]+[teType] (the
+     * cross-device identity for treatments) and UPDATES it; a missing target is rejected (it can't edit a deleted
+     * event). [note] is applied verbatim, including null, so clearing a note works. Carries no dose. ≥0, list-handled.
+     */
+    data class TherapyEventEdit(
+        val teType: TE.Type,
+        val timestamp: Long,
+        val location: TE.Location? = null,
+        val arrow: TE.Arrow? = null,
+        val note: String? = null,
+        // See [TherapyEvent.source]: audit source on the sending device; a relayed edit is logged by the master.
+        val source: Sources
+    ) : BatchAction
 }

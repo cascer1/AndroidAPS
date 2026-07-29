@@ -30,7 +30,6 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import app.aaps.core.ui.R
@@ -44,12 +43,15 @@ import app.aaps.core.ui.R
  * @param passwordWarning Optional warning text shown in error color
  * @param onConfirm Called with entered password when OK is clicked
  * @param onCancel Called when Cancel is clicked or dialog is dismissed
+ *
+ * @see QueryAnyPasswordDialogPreview
  */
 @Composable
 fun QueryAnyPasswordDialog(
     title: String,
     passwordExplanation: String? = null,
     passwordWarning: String? = null,
+    errorMessage: String? = null,
     onConfirm: (String) -> Unit,
     onCancel: () -> Unit
 ) {
@@ -104,6 +106,8 @@ fun QueryAnyPasswordDialog(
                     value = passwordText,
                     onValueChange = { passwordText = it },
                     label = { Text(stringResource(R.string.protection_password_hint)) },
+                    isError = errorMessage != null,
+                    supportingText = errorMessage?.let { msg -> { Text(msg, color = MaterialTheme.colorScheme.error) } },
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
@@ -142,18 +146,4 @@ fun QueryAnyPasswordDialog(
         },
         properties = DialogProperties(dismissOnBackPress = false, dismissOnClickOutside = false)
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun QueryAnyPasswordDialogPreview() {
-    MaterialTheme {
-        QueryAnyPasswordDialog(
-            title = "Import Password",
-            passwordExplanation = "Enter the password used to encrypt the export file.",
-            passwordWarning = "Warning: incorrect password will result in failed import.",
-            onConfirm = {},
-            onCancel = {}
-        )
-    }
 }

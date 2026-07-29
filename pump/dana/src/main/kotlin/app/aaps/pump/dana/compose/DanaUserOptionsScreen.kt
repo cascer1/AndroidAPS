@@ -34,7 +34,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.NumberInputRow
@@ -62,8 +61,11 @@ fun DanaUserOptionsScreen(
     )
 }
 
+/**
+ * @see DanaUserOptionsPreview
+ */
 @Composable
-private fun DanaUserOptionsContent(
+internal fun DanaUserOptionsContent(
     state: UserOptionsUiState,
     onTimeFormatChange: (Boolean) -> Unit = {},
     onButtonScrollChange: (Boolean) -> Unit = {},
@@ -230,27 +232,6 @@ private fun DanaUserOptionsContent(
                 }
             }
         }
-    }
-}
-
-@Preview(showBackground = true, name = "User Options")
-@Composable
-private fun DanaUserOptionsPreview() {
-    MaterialTheme {
-        DanaUserOptionsContent(
-            state = UserOptionsUiState(
-                timeFormat24h = true,
-                buttonScroll = false,
-                beepOnPress = true,
-                alarmMode = 1,
-                screenTimeout = 15,
-                backlight = 5,
-                glucoseUnitMmol = false,
-                shutdownHour = 0,
-                lowReservoir = 20,
-                minBacklight = 1
-            )
-        )
     }
 }
 

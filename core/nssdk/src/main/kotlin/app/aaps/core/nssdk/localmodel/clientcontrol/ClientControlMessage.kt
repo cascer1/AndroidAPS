@@ -118,7 +118,8 @@ sealed class ClientControlMessage {
     @SerialName("bolus_commit")
     data class BolusCommit(
         val bolusId: Long,
-        val asAdvisor: Boolean = false
+        val asAdvisor: Boolean = false,
+        val correctionU: Double = 0.0,
     ) : ClientControlMessage()
 
     /**
@@ -224,7 +225,20 @@ data class BatchActionDto(
     // temp_basal ([rate] = percent or absolute U/h per [isPercent]; reuses [durationMinutes]).
     // extended_bolus reuses [insulin] + [durationMinutes].
     val rate: Double = 0.0,
-    val isPercent: Boolean = false
+    val isPercent: Boolean = false,
+    // therapy_event (careportal): reuses [timestamp], [notes], [durationMinutes]; carries its own glucose/type/site
+    val teType: String? = null,
+    val glucoseMgdl: Double? = null,
+    val meterType: String? = null,
+    val location: String? = null,
+    val arrow: String? = null,
+    val source: String? = null, // round-trips for symmetry; the master ignores it (relayed events are logged as Sources.NSClient)
+    // bolus eCarbs split: extended carbs amount, delay, and duration (0 = no eCarbs)
+    val eCarbsGrams: Int = 0,
+    val eCarbsDelayMinutes: Int = 0,
+    val eCarbsDurationHours: Int = 0,
+    // bolus: originating QuickWizard guid (INSULIN/CARBS mode) so the master marks the entry used on commit (lastUsed)
+    val quickWizardGuid: String? = null
 ) {
 
     companion object {
@@ -242,5 +256,12 @@ data class BatchActionDto(
 
         // insulin_activate reuses [iCfgJson] — the master re-applies its active profile with this insulin config.
         const val TYPE_INSULIN_ACTIVATE = "insulin_activate"
+
+        // therapy_event (careportal): the master persists a TherapyEvent (it is the sole writer; syncs back via NS).
+        const val TYPE_THERAPY_EVENT = "therapy_event"
+
+        // therapy_event_edit: the master UPDATES an existing TherapyEvent it locates by teType+timestamp (reuses the
+        // teType/timestamp/location/arrow/notes/source fields). Distinct from create so it never insert-if-news.
+        const val TYPE_THERAPY_EVENT_EDIT = "therapy_event_edit"
     }
 }

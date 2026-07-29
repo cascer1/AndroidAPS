@@ -1,10 +1,5 @@
 package app.aaps.core.ui.compose.icons
 
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Icon
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -12,7 +7,6 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.group
 import androidx.compose.ui.graphics.vector.path
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 
 /**
@@ -24,6 +18,8 @@ import androidx.compose.ui.unit.dp
  * is no even-odd inversion — the badge simply merges with the ring where they meet.
  *
  * The whole vector is tinted by a single color at the call site.
+ *
+ * @see IcLoopPausedDstIconPreview
  */
 val IcLoopPausedDst: ImageVector by lazy {
     ImageVector.Builder(
@@ -124,17 +120,4 @@ val IcLoopPausedDst: ImageVector by lazy {
             }
         }
     }.build()
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun IcLoopPausedDstIconPreview() {
-    Icon(
-        imageVector = IcLoopPausedDst,
-        contentDescription = null,
-        modifier = Modifier
-            .padding(0.dp)
-            .size(48.dp),
-        tint = Color.Unspecified
-    )
 }

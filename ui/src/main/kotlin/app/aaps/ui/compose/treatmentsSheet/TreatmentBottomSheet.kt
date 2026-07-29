@@ -29,13 +29,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import app.aaps.core.interfaces.navigation.ElementType
+import app.aaps.core.keys.interfaces.ElementVisibility
+import app.aaps.core.ui.compose.MasterOfflineBanner
 import app.aaps.core.ui.compose.TonalIcon
 import app.aaps.core.ui.compose.consumeOverscroll
 import app.aaps.core.ui.compose.icons.IcBolus
 import app.aaps.core.ui.compose.icons.IcCarbs
-import app.aaps.core.ui.compose.navigation.ElementType
+import app.aaps.core.ui.compose.masterEditingEnabled
 import app.aaps.core.ui.compose.navigation.NavigationRequest
 import app.aaps.core.ui.compose.navigation.color
 import app.aaps.core.ui.compose.navigation.descriptionResId
@@ -98,8 +100,11 @@ fun TreatmentBottomSheet(
     }
 }
 
+/**
+ * @see TreatmentBottomSheetPreview
+ */
 @Composable
-private fun TreatmentSelectionContent(
+internal fun TreatmentSelectionContent(
     onDismiss: () -> Unit,
     onNavigate: (NavigationRequest) -> Unit,
     quickWizardItems: List<QuickWizardItem>,
@@ -146,11 +151,18 @@ private fun TreatmentSelectionContent(
             }
         }
 
+        // True on a master / reachable client; false when the client's master is unreachable or has control disabled.
+        // Drives the banner + disables the relayed treatment buttons (Insulin/Carbs/Wizard/Treatment/QuickWizard);
+        // local CGM / Calibration stay enabled.
+        val editingEnabled = masterEditingEnabled()
+        // Explains offline vs. control-disabled; renders nothing when editing is enabled.
+        MasterOfflineBanner(editingEnabled = editingEnabled)
+
         val disabledAlpha = 0.38f
 
         // QuickWizard entries
         quickWizardItems.forEach { item ->
-            val itemEnabled = item.isEnabled
+            val itemEnabled = item.isEnabled && editingEnabled
             val itemIcon = when (item.mode) {
                 1    -> IcBolus    // INSULIN
                 2    -> IcCarbs    // CARBS
@@ -273,7 +285,7 @@ private fun TreatmentSelectionContent(
 }
 
 @Composable
-private fun TreatmentSettingsContent(
+internal fun TreatmentSettingsContent(
     settingsDef: PreferenceSubScreenDef,
     onBack: () -> Unit
 ) {
@@ -310,11 +322,15 @@ private fun TreatmentItem(
 ) {
     val color = elementType.color()
     val descResId = elementType.descriptionResId()
+    // A relayed action (visible only to master/paired-client) is also DISABLED when the master is unreachable or
+    // has remote control off. Local items (CGM, Calibration) use the default ALWAYS visibility → stay enabled.
+    val effectiveEnabled = enabled &&
+        (masterEditingEnabled() || elementType.visibility != ElementVisibility.MASTER_OR_PAIRED_CLIENT)
     ListItem(
         headlineContent = {
             Text(
                 text = stringResource(elementType.labelResId()),
-                color = if (enabled) color
+                color = if (effectiveEnabled) color
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha)
             )
         },
@@ -322,7 +338,7 @@ private fun TreatmentItem(
             {
                 Text(
                     text = stringResource(descResId),
-                    color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (effectiveEnabled) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = disabledAlpha)
                 )
             }
@@ -330,39 +346,15 @@ private fun TreatmentItem(
         leadingContent = {
             TonalIcon(
                 icon = elementType.icon(),
-                color = if (enabled) color
+                color = if (effectiveEnabled) color
                 else MaterialTheme.colorScheme.onSurface.copy(alpha = disabledAlpha),
-                enabled = enabled
+                enabled = effectiveEnabled
             )
         },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = if (enabled) Modifier.clickable {
+        modifier = if (effectiveEnabled) Modifier.clickable {
             onDismiss()
             onClick()
         } else Modifier
     )
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun TreatmentBottomSheetPreview() {
-    MaterialTheme {
-        TreatmentSelectionContent(
-            onDismiss = {},
-            onNavigate = {},
-            quickWizardItems = listOf(
-                QuickWizardItem(guid = "1", buttonText = "Meal", detail = "36g / 2.5U", isEnabled = true),
-                QuickWizardItem(guid = "2", buttonText = "Snack", detail = "12g / 0.8U", disabledReason = "No insulin required")
-            ),
-            showCgm = true,
-            showCalibration = true,
-            showTreatment = true,
-            showInsulin = true,
-            showCarbs = true,
-            showCalculator = true,
-            isDexcomSource = false,
-            showSettingsIcon = true,
-            onSettingsClick = {}
-        )
-    }
 }

@@ -27,6 +27,7 @@ import app.aaps.core.keys.DoubleKey
 import app.aaps.core.keys.IntKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.wear.R
+import app.aaps.wear.complications.BgGraphComplication
 import app.aaps.wear.complications.BrCobIobComplication
 import app.aaps.wear.complications.BrCobIobComplicationExt1
 import app.aaps.wear.complications.BrCobIobComplicationExt2
@@ -63,6 +64,7 @@ import com.google.android.gms.wearable.WearableListenerService
 import io.reactivex.rxjava3.disposables.CompositeDisposable
 import io.reactivex.rxjava3.kotlin.plusAssign
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -133,6 +135,9 @@ class DataHandlerWear @Inject constructor(
                         // CLIENT relay: the ✓ must NOT flash success — it shows the spinner + waits for the master's
                         // real commit terminal ([RemoteDelivered] / error). False on a master (instant local success).
                         bundle.putBoolean(DataLayerListenerServiceWear.KEY_DEFER_CONFIRM, it.deferConfirm)
+                        it.wizardDetail?.let { d ->
+                            bundle.putString(DataLayerListenerServiceWear.KEY_WIZARD_DETAIL, Json.encodeToString(EventData.WizardDetail.serializer(), d))
+                        }
                     }
                 )
             })
@@ -406,6 +411,8 @@ class DataHandlerWear @Inject constructor(
             SgvComplicationExt1::class.java,
             SgvComplicationExt2::class.java,
             SgvLargeComplication::class.java,
+            // BG graph image complication (for WFF watchfaces on watches without CWF support)
+            BgGraphComplication::class.java,
             // Long status complications (show detailed glucose + status info)
             LongStatusComplication::class.java,
             LongStatusFlippedComplication::class.java,

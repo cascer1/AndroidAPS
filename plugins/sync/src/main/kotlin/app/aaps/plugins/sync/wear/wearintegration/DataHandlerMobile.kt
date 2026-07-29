@@ -36,7 +36,6 @@ import app.aaps.core.interfaces.constraints.ConstraintsChecker
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.ProcessedTbrEbData
 import app.aaps.core.interfaces.insulin.ConcentrationHelper
-import app.aaps.core.interfaces.insulin.Insulin
 import app.aaps.core.interfaces.iob.GlucoseStatusProvider
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
@@ -64,6 +63,7 @@ import app.aaps.core.interfaces.rx.weardata.LoopStatusData
 import app.aaps.core.interfaces.rx.weardata.OapsResultInfo
 import app.aaps.core.interfaces.rx.weardata.TargetRange
 import app.aaps.core.interfaces.rx.weardata.TempTargetInfo
+import app.aaps.core.interfaces.scenes.SceneActions
 import app.aaps.core.interfaces.scenes.SceneAutomationApi
 import app.aaps.core.interfaces.scenes.SceneAutomationResult
 import app.aaps.core.interfaces.tempTargets.ttDurationMinutes
@@ -82,6 +82,7 @@ import app.aaps.core.keys.StringNonKey
 import app.aaps.core.keys.UnitDoubleKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.objects.constraints.ConstraintObject
+import app.aaps.core.objects.extensions.apsAdjustedTargetMgdl
 import app.aaps.core.objects.extensions.convertedToAbsolute
 import app.aaps.core.objects.extensions.generateCOBString
 import app.aaps.core.objects.extensions.round
@@ -91,6 +92,7 @@ import app.aaps.core.objects.runningMode.PumpCommandGate
 import app.aaps.core.objects.runningMode.RunningModeGuard
 import app.aaps.core.objects.wizard.QuickWizard
 import app.aaps.core.objects.wizard.QuickWizardEntry
+import app.aaps.core.objects.wizard.QuickWizardMode
 import app.aaps.core.ui.clientcontrol.failTextResId
 import app.aaps.core.ui.compose.DarkGeneralColors
 import app.aaps.core.ui.compose.LightGeneralColors
@@ -135,7 +137,6 @@ class DataHandlerMobile @Inject constructor(
     private val dateUtil: DateUtil,
     private val constraintChecker: ConstraintsChecker,
     private val activePlugin: ActivePlugin,
-    private val insulin: Insulin,
     private val commandQueue: CommandQueue,
     private val fabricPrivacy: FabricPrivacy,
     private val uiInteraction: UiInteraction,
@@ -156,6 +157,7 @@ class DataHandlerMobile @Inject constructor(
 
     @Inject lateinit var automation: Automation
     @Inject lateinit var scenes: SceneAutomationApi
+    @Inject lateinit var sceneActions: SceneActions
     private val disposable = CompositeDisposable()
 
     /**
@@ -262,7 +264,14 @@ class DataHandlerMobile @Inject constructor(
             // Commit the parked dose by id through the role-transparent relay (MASTER → local deliver; CLIENT →
             // signed BolusCommit). Consume-once = no double bolus; a failure surfaces to the watch.
             contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
-            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)))
+            // markAsUsed is done by the MASTER inside the executor's confirm() (a fixed QuickWizard batch carries its
+            // quickWizardGuid) — this device must NOT write the synced QuickWizard pref itself (on a client that pushes
+            // it back over the round-trip → "Update settings … Another action is already in progress"). On a delivered
+            // bolus refresh the tile's lastUsed: immediate on a master; on a client it reflects after the master's mark
+            // syncs back via the cold-doc.
+            onCommitResult(batchExecutor.commit(it.bolusId, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.overview_treatment_label))) {
+                sendQuickWizardListToWear()
+            }
         }
         onEvent<EventData.ActionECarbsPreCheck> { handleECarbsPreCheck(it) }
         onEvent<EventData.ActionECarbsConfirmed> {
@@ -291,8 +300,8 @@ class DataHandlerMobile @Inject constructor(
             // NOTE: `it.timeStamp` is NOT a timestamp here — the legacy field name carries the master-assigned
             // consume-once bolusId of the parked prepare. Do not rename the field (wire-compat with older watches).
             contacting() // CLIENT: show the spinner during the commit round-trip too (no-op on master).
-            onCommitResult(wizardExecutor.commit(it.timeStamp, asAdvisor = false, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.boluswizard))) {
-                sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+            onCommitResult(wizardExecutor.commit(it.timeStamp, asAdvisor = false, Sources.Wear, rh.gs(app.aaps.core.ui.R.string.boluswizard), correctionU = it.correctionU)) {
+                sendQuickWizardListToWear()
             }
         }
         onEvent<EventData.ActionUserActionPreCheck> {
@@ -314,6 +323,14 @@ class DataHandlerMobile @Inject constructor(
         onEvent<EventData.ActionSceneStop> {
             if (!config.appInitialized) return@onEvent
             scenes.stopActiveScene()
+        }
+        onEvent<EventData.ActionSceneStopPreCheck> {
+            if (!config.appInitialized) return@onEvent
+            handleSceneStopPreCheck()
+        }
+        onEvent<EventData.ActionSceneStopConfirmed> {
+            if (!config.appInitialized) return@onEvent
+            onCommitResult(sceneActions.stop(triggerChain = false))
         }
         onEventSync<EventData.SnoozeAlert> { uiInteraction.stopAlarm("Muted from wear") }
         onEventSync<EventData.WearException> { fabricPrivacy.logWearException(it) }
@@ -418,14 +435,9 @@ class DataHandlerMobile @Inject constructor(
 
         // Build autosens-adjusted target (only when no TT active)
         val autosensTarget = if (tempTarget == null && profile != null) {
-            val targetUsed =
-                if (config.APS) loop.lastRun?.constraintsProcessed?.targetBG ?: 0.0
-                else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.targetBG ?: 0.0
-                else 0.0
-            if (targetUsed != 0.0 && abs(profile.getTargetMgdl() - targetUsed) > 0.01) {
-                val units = if (profileUtil.units == GlucoseUnit.MGDL) "mg/dL" else "mmol/L"
-                "${profileUtil.fromMgdlToStringInUnits(targetUsed)} $units"
-            } else null
+            val adjustedTarget = profile.apsAdjustedTargetMgdl(loop, config, processedDeviceStatusData)
+            if (adjustedTarget != null) profileUtil.fromMgdlToStringWithUnits(adjustedTarget)
+            else null
         } else null
 
         // Build default range
@@ -585,7 +597,8 @@ class DataHandlerMobile @Inject constructor(
             useTt = preferences.get(BooleanKey.WearWizardTt),
             useTrend = preferences.get(BooleanKey.WearWizardTrend),
             alarm = false,
-            notes = ""
+            notes = "",
+            source = Sources.Wear
         )
         contacting()
         shipPrepared(
@@ -645,46 +658,86 @@ class DataHandlerMobile @Inject constructor(
     }
 
     private suspend fun handleScenePreCheck(command: EventData.ActionScenePreCheck) {
-        val pump = activePlugin.activePump
-        val profile = profileFunction.getProfile()
-        if (loop.runningMode().isLoopRunning() && pump.isInitialized() && profile != null) {
-            val scene = scenes.getScene(command.id)
-            if (scene != null && scene.isEnabled) {
-                sendToWear(
-                    EventData.ConfirmAction(
-                        rh.gs(app.aaps.core.ui.R.string.confirm).uppercase(), command.title,
-                        returnCommand = EventData.ActionSceneConfirmed(command.id, command.title)
-                    )
-                )
-            } else {
-                sendError(rh.gs(R.string.scene_not_available, command.title))
-            }
-        } else {
-            sendError(rh.gs(app.aaps.core.ui.R.string.wizard_pump_not_available))
+        val label = rh.gs(app.aaps.core.ui.R.string.scenes)
+        contacting()
+        shipPrepared(sceneActions.prepareStart(command.id), label) { bolusId ->
+            EventData.ActionSceneConfirmed(command.id, command.title, bolusId)
         }
     }
 
     private suspend fun handleSceneConfirmed(command: EventData.ActionSceneConfirmed) {
-        when (val result = scenes.runScene(command.id)) {
-            is SceneAutomationResult.Success        -> Unit
-            is SceneAutomationResult.SceneNotFound,
-            is SceneAutomationResult.SceneDisabled  -> sendError(rh.gs(R.string.scene_not_available, command.title))
-
-            is SceneAutomationResult.Failed         -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
-            // runScene never returns ChainCompleted (only stopActiveSceneAndStartScene does), but the
-            // sealed interface forces exhaustiveness here.
-            is SceneAutomationResult.ChainCompleted -> Unit
+        if (command.bolusId != null) {
+            onCommitResult(sceneActions.commitStart(command.bolusId!!))
+        } else {
+            // Fallback for watch builds that pre-date the SceneActions flow (no bolusId).
+            when (val result = scenes.runScene(command.id)) {
+                is SceneAutomationResult.Success        -> Unit
+                is SceneAutomationResult.SceneNotFound,
+                is SceneAutomationResult.SceneDisabled  -> sendError(rh.gs(R.string.scene_not_available, command.title))
+                is SceneAutomationResult.Failed         -> sendError(result.message ?: rh.gs(R.string.scene_not_available, command.title))
+                is SceneAutomationResult.ChainCompleted -> Unit
+            }
         }
     }
 
-    private suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
-        // Role-transparent recompute: MASTER computes + caps + parks + authors lines locally; CLIENT relays a
-        // BolusPrepare(guid) to the master (gated on masterReachable). The watch renders the master's EXACT lines.
-        contacting()
-        shipPrepared(
-            wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(command.guid), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
-            rh.gs(app.aaps.core.ui.R.string.boluswizard)
-        ) { EventData.ActionWizardConfirmed(it) }
+    private suspend fun handleSceneStopPreCheck() {
+        // Build confirm locally — no master round-trip needed before showing "End active scene".
+        // The watch waits for RemoteDelivered (deferConfirm) while the stop relays to master.
+        if (!scenes.isAnySceneActive()) return sendError(rh.gs(app.aaps.core.ui.R.string.scene_ended))
+        sendToWear(
+            EventData.ConfirmAction(
+                title = rh.gs(app.aaps.core.ui.R.string.scenes),
+                message = "",
+                returnCommand = EventData.ActionSceneStopConfirmed(),
+                lines = listOf(EventData.ConfirmActionLine(ConfirmationRole.NORMAL.name, rh.gs(app.aaps.core.ui.R.string.scene_end_active))),
+                deferConfirm = config.AAPSCLIENT
+            )
+        )
+    }
+
+    // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
+    internal suspend fun handleQuickWizardPreCheck(command: EventData.ActionQuickWizardPreCheck) {
+        // Branch on the entry mode exactly like the phone (MainViewModel.executeQuickWizard): a fixed INSULIN/CARBS
+        // button goes through the generic BatchExecutor (no wizard recompute — that would deliver insulin for a
+        // carbs-only button), while a WIZARD button recomputes the dose. All three stay role-transparent (MASTER →
+        // local; CLIENT → signed round-trip) and the master is the single capping + confirmation authority.
+        // A null entry (guid gone) falls through to the wizard path, which ships a proper "not available" error.
+        val entry = quickWizard.get(command.guid)
+        when (entry?.mode()) {
+            QuickWizardMode.INSULIN -> sendBatchPreCheck(
+                BatchAction.Bolus(
+                    insulin = entry.insulin(), carbs = 0, carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                    recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null,
+                    quickWizardGuid = command.guid // the MASTER marks the entry used on commit (SOT) — no local pref write
+                ),
+                label = rh.gs(app.aaps.core.ui.R.string.bolus)
+            ) { bolusId -> EventData.ActionBolusConfirmed(bolusId) }
+
+            QuickWizardMode.CARBS   -> {
+                val hasEcarbs = entry.useEcarbs() == QuickWizardEntry.YES
+                sendBatchPreCheck(
+                    BatchAction.Bolus(
+                        insulin = 0.0, carbs = entry.carbs(), carbsTimeOffsetMinutes = 0, carbsDurationHours = 0,
+                        recordOnly = false, notes = entry.buttonText(), timestamp = 0L, iCfg = null,
+                        eCarbsGrams = if (hasEcarbs) entry.carbs2() else 0,
+                        eCarbsDelayMinutes = if (hasEcarbs) entry.time() else 0,
+                        eCarbsDurationHours = if (hasEcarbs) entry.duration() else 0,
+                        quickWizardGuid = command.guid // the MASTER marks the entry used on commit (SOT) — no local pref write
+                    ),
+                    label = rh.gs(app.aaps.core.ui.R.string.carbs)
+                ) { bolusId -> EventData.ActionBolusConfirmed(bolusId) }
+            }
+
+            else                    -> {
+                // Role-transparent recompute: MASTER computes + caps + parks + authors lines locally; CLIENT relays a
+                // BolusPrepare(guid) to the master (gated on masterReachable). The watch renders the master's EXACT lines.
+                contacting()
+                shipPrepared(
+                    wizardExecutor.prepare(WizardExecutor.WizardSource.QuickWizard(command.guid), rh.gs(app.aaps.core.ui.R.string.boluswizard)),
+                    rh.gs(app.aaps.core.ui.R.string.boluswizard)
+                ) { EventData.ActionWizardConfirmed(it) }
+            }
+        }
     }
 
     // internal (not private) so DataHandlerMobileWearBolusTest can drive it without RxBus scaffolding.
@@ -724,8 +777,11 @@ class DataHandlerMobile @Inject constructor(
      * the master-authored [lines][EventData.ConfirmAction.lines] to the watch with the parked bolusId. The wear ✓
      * commits by id (consume-once). (Was a local-only `wizardBolusExecutor.prepareBatch`; now everything runs on the master.)
      */
-    private suspend fun sendBatchPreCheck(bolus: BatchAction.Bolus, returnCommand: (bolusId: Long) -> EventData) {
-        val label = rh.gs(app.aaps.core.ui.R.string.overview_treatment_label)
+    private suspend fun sendBatchPreCheck(
+        bolus: BatchAction.Bolus,
+        label: String = rh.gs(app.aaps.core.ui.R.string.overview_treatment_label),
+        returnCommand: (bolusId: Long) -> EventData
+    ) {
         contacting()
         shipPrepared(batchExecutor.prepare(listOf(bolus), Sources.Wear, label), label, returnCommand)
     }
@@ -748,7 +804,8 @@ class DataHandlerMobile @Inject constructor(
                     title, message = "",
                     returnCommand = returnCommand(progress.id),
                     lines = progress.lines.map { EventData.ConfirmActionLine(it.role.name, it.text) },
-                    deferConfirm = config.AAPSCLIENT
+                    deferConfirm = config.AAPSCLIENT,
+                    wizardDetail = progress.wizardDetail,
                 )
             )
 
@@ -941,8 +998,13 @@ class DataHandlerMobile @Inject constructor(
         val states = if (allStates.any { it.state == AvailableRunningMode.RunningMode.LOOP_USER_SUSPEND })
             allStates.filter { it.state != AvailableRunningMode.RunningMode.LOOP_DISABLE }
         else allStates
-        lastAuthorizedRunningModeChangeTS = System.currentTimeMillis()
-        lastRunningModes = states
+        // Only rotate the timestamp when available modes actually change.
+        // Keeping the old TS when modes are identical lets in-flight tile taps (e.g. from a
+        // just-woken watch) succeed without a "Please try again" race against onTileEnterEvent.
+        if (states != lastRunningModes || lastAuthorizedRunningModeChangeTS == null) {
+            lastAuthorizedRunningModeChangeTS = System.currentTimeMillis()
+            lastRunningModes = states
+        }
         sendToWear(
             EventData.RunningModeList(lastAuthorizedRunningModeChangeTS!!, states)
         )
@@ -1000,6 +1062,9 @@ class DataHandlerMobile @Inject constructor(
             insulin = insulin()
         )
 
+    private fun sendQuickWizardListToWear() =
+        sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+
     suspend fun resendData(from: String) {
         aapsLogger.debug(LTag.WEAR, "Sending data to wear from $from")
         // Wear can request a resend before MainApp's init scope has populated pluginStore.plugins
@@ -1027,7 +1092,7 @@ class DataHandlerMobile @Inject constructor(
             )
         )
         // QuickWizard
-        sendToWear(EventData.QuickWizard(ArrayList(quickWizard.list().filter { e -> e.forDevice(QuickWizardEntry.DEVICE_WATCH) }.map { e -> e.toWear() })))
+        sendQuickWizardListToWear()
         //UserAction
         sendUserActions()
         // Scenes
@@ -1272,27 +1337,31 @@ class DataHandlerMobile @Inject constructor(
             profileUtil.toTargetRangeString(tempTarget.lowTarget, tempTarget.highTarget, GlucoseUnit.MGDL, units)
         } ?: profileFunction.getProfile()?.let { profile ->
             // If the target is not the same as set in the profile then oref has overridden it
-            val targetUsed =
-                if (config.APS) loop.lastRun?.constraintsProcessed?.targetBG ?: 0.0
-                else if (config.AAPSCLIENT) processedDeviceStatusData.getAPSResult()?.targetBG ?: 0.0
-                else 0.0
-
-            if (targetUsed != 0.0 && abs(profile.getTargetMgdl() - targetUsed) > 0.01) {
+            val adjustedTarget = profile.apsAdjustedTargetMgdl(loop, config, processedDeviceStatusData)
+            if (adjustedTarget != null) {
                 tempTargetLevel = 1     // Green
-                profileUtil.toTargetRangeString(targetUsed, targetUsed, GlucoseUnit.MGDL, units)
+                profileUtil.toTargetRangeString(adjustedTarget, adjustedTarget, GlucoseUnit.MGDL, units)
             } else {
                 profileUtil.toTargetRangeString(profile.getTargetLowMgdl(), profile.getTargetHighMgdl(), GlucoseUnit.MGDL, units)
             }
         } ?: ""
         // Reservoir Level
         val pump = activePlugin.activePump
-        val iCfg = insulin.iCfg
         val maxReading = pump.pumpDescription.maxReservoirReading.toDouble()
-        val reservoir = pump.reservoirLevel.value.iU(iCfg.concentration).let { if (pump.pumpDescription.isPatchPump && it > maxReading) maxReading else it }
+        // Concentration comes from the running profile, which owns the authoritative iCfg. With no
+        // profile there is no IU conversion to make, so the reservoir is reported as unavailable
+        // rather than converted at a guessed concentration.
+        val concentration = profile?.iCfg?.concentration
+        val reservoir = concentration?.let { c ->
+            pump.reservoirLevel.value.iU(c).let { if (pump.pumpDescription.isPatchPump && it > maxReading) maxReading else it }
+        } ?: 0.0
         val reservoirString = if (reservoir > 0) decimalFormatter.to0Decimal(reservoir, rh.gs(app.aaps.core.ui.R.string.insulin_unit_shortname)) else ""
         val resUrgent = preferences.get(IntKey.OverviewResCritical)
         val resWarn = preferences.get(IntKey.OverviewResWarning)
         val reservoirLevel = when {
+            // Unknown must not fall through the thresholds: a 0.0 reservoir is <= resUrgent and would
+            // raise a false critical-reservoir alarm on the watch.
+            concentration == null  -> 0
             reservoir <= resUrgent -> 2
             reservoir <= resWarn   -> 1
             else                   -> 0
@@ -1513,7 +1582,7 @@ class DataHandlerMobile @Inject constructor(
     private suspend fun generateStatusString(profile: Profile?): String {
         var status = ""
         profile ?: return rh.gs(app.aaps.core.ui.R.string.noprofile)
-        if (!loop.runningMode().isLoopRunning()) status += rh.gs(R.string.disabled_loop) + "\n"
+        if (!loop.runningMode().isLoopRunning()) status += rh.gs(app.aaps.core.ui.R.string.disabled_loop) + "\n"
         return status
     }
 

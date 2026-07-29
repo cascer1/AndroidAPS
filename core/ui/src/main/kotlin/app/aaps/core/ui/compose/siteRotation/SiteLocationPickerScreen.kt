@@ -10,7 +10,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import app.aaps.core.ui.compose.AapsTopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,13 +17,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import app.aaps.core.data.model.TE
 import app.aaps.core.ui.R
+import app.aaps.core.ui.compose.AapsTopAppBar
 
 /**
  * Full-screen wrapper for [SiteLocationPicker] with a top bar and confirm button.
  * Used when navigating from a dialog (Fill, Care) to pick a site location.
+ *
+ * @see SiteLocationPickerScreenPreview
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,19 +78,6 @@ fun SiteLocationPickerScreen(
             onLocationSelected = { selectedLocation = it },
             onArrowSelected = { selectedArrow = it },
             modifier = Modifier.padding(paddingValues)
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun SiteLocationPickerScreenPreview() {
-    MaterialTheme {
-        SiteLocationPickerScreen(
-            siteType = TE.Type.CANNULA_CHANGE,
-            bodyType = BodyType.MAN,
-            onClose = {},
-            onLocationConfirmed = { _, _ -> }
         )
     }
 }

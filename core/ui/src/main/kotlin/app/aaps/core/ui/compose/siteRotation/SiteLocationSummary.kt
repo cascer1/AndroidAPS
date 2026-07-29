@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.aaps.core.data.model.TE
 import app.aaps.core.ui.R
@@ -32,6 +31,9 @@ import app.aaps.core.ui.compose.icons.IcCgmInsert
  * @param lastLocationString formatted string of last used location (or null if none)
  * @param selectedLocationString formatted string of currently selected location (or null if not yet picked)
  * @param onPickSiteClick callback to open the full picker screen
+ *
+ * @see SiteLocationSummaryNoSelectionPreview
+ * @see SiteLocationSummaryWithSelectionPreview
  */
 @Composable
 fun SiteLocationSummary(
@@ -88,31 +90,5 @@ fun SiteLocationSummary(
                 Text(stringResource(R.string.pick_site))
             }
         }
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun SiteLocationSummaryNoSelectionPreview() {
-    MaterialTheme {
-        SiteLocationSummary(
-            siteType = TE.Type.CANNULA_CHANGE,
-            lastLocationString = "Right Upper Abdomen",
-            selectedLocationString = null,
-            onPickSiteClick = {}
-        )
-    }
-}
-
-@Preview(showBackground = true)
-@Composable
-private fun SiteLocationSummaryWithSelectionPreview() {
-    MaterialTheme {
-        SiteLocationSummary(
-            siteType = TE.Type.SENSOR_CHANGE,
-            lastLocationString = "Right Upper Abdomen",
-            selectedLocationString = "Left Upper Arm",
-            onPickSiteClick = {}
-        )
     }
 }

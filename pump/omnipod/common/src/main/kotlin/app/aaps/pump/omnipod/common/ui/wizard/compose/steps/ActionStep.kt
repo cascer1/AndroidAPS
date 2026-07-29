@@ -13,7 +13,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.ui.compose.banner.ErrorBanner
@@ -69,6 +68,12 @@ fun ActionStep(
     )
 }
 
+/**
+ * @see PreviewExecuting
+ * @see PreviewSuccess
+ * @see PreviewError
+ * @see PreviewErrorDeactivate
+ */
 @Composable
 internal fun ActionStepContent(
     actionState: ActionState,
@@ -138,54 +143,5 @@ internal fun ActionStepContent(
                 extraErrorContent()
             }
         }
-    }
-}
-
-@Preview(showBackground = true, name = "Action - Executing")
-@Composable
-private fun PreviewExecuting() {
-    MaterialTheme {
-        ActionStepContent(
-            actionState = ActionState.Executing,
-            text = "Initializing pod...",
-            onNext = {}, onRetry = {}, onCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Action - Success")
-@Composable
-private fun PreviewSuccess() {
-    MaterialTheme {
-        ActionStepContent(
-            actionState = ActionState.Idle, // Idle used as stand-in for Success in preview
-            text = "Pod initialized successfully.",
-            onNext = {}, onRetry = {}, onCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Action - Error")
-@Composable
-private fun PreviewError() {
-    MaterialTheme {
-        ActionStepContent(
-            actionState = ActionState.Error("Communication error. Please retry."),
-            text = "Initializing pod...",
-            onNext = {}, onRetry = {}, onCancel = {}
-        )
-    }
-}
-
-@Preview(showBackground = true, name = "Action - Error with Deactivate")
-@Composable
-private fun PreviewErrorDeactivate() {
-    MaterialTheme {
-        ActionStepContent(
-            actionState = ActionState.Error("Pod alarm triggered."),
-            text = "Initializing pod...",
-            showDeactivateButton = true,
-            onNext = {}, onRetry = {}, onCancel = {}, onDeactivatePod = {}
-        )
     }
 }
