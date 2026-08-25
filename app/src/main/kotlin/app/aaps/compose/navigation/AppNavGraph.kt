@@ -33,6 +33,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import app.aaps.core.data.model.TE
 import app.aaps.core.data.time.T
+import app.aaps.core.interfaces.configuration.ConfigBuilder
 import app.aaps.core.interfaces.constraints.Objectives
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.maintenance.FileListProvider
@@ -151,6 +152,7 @@ fun NavGraphBuilder.appNavGraph(
     preferences: Preferences,
     rh: ResourceHelper,
     builtInSearchables: BuiltInSearchables,
+    configBuilder: ConfigBuilder,
     prefFileList: FileListProvider,
     persistenceLayer: PersistenceLayer,
     visibilityContext: VisibilityContext,
@@ -509,6 +511,7 @@ fun NavGraphBuilder.appNavGraph(
             activePlugin = activePlugin,
             rh = rh,
             builtInSearchables = builtInSearchables,
+            configBuilder = configBuilder,
             onBackClick = { navController.safePopBackStack() }
         )
     }
@@ -678,7 +681,7 @@ fun NavGraphBuilder.appNavGraph(
     ) { backStackEntry ->
         val siteTypeOrdinal = backStackEntry.arguments?.getInt("siteTypeOrdinal") ?: 0
         val siteType = TE.Type.entries[siteTypeOrdinal]
-        val entries by produceState(initialValue = emptyList<TE>()) {
+        val entries by produceState(initialValue = emptyList()) {
             value = persistenceLayer.getTherapyEventDataFromTime(
                 System.currentTimeMillis() - T.days(45).msecs(), false
             ).filter { it.type == TE.Type.CANNULA_CHANGE || it.type == TE.Type.SENSOR_CHANGE }
@@ -834,7 +837,7 @@ private fun PluginContentRoute(
 
 /**
  * Fallback for routes whose navigation target cannot be resolved (unknown preference key, missing
- * plugin index, …). Replaces the previous behaviour where such routes rendered nothing, leaving the
+ * plugin index, …). Replaces the previous behavior where such routes rendered nothing, leaving the
  * user on a blank, stuck screen: posts an error snackbar via [rxBus] and immediately pops back so
  * the dead route never stays on screen.
  */
