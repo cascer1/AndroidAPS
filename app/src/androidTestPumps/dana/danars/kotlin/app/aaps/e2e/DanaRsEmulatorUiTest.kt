@@ -2,21 +2,20 @@ package app.aaps.e2e
 
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
-import app.aaps.di.ResetGraphRule
-import app.aaps.di.testGraphs
-import app.aaps.pump.danars.di.DanaRSAccessors
 import app.aaps.ComposeMainActivity
 import app.aaps.core.data.model.ICfg
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.plugin.PluginBase
-import app.aaps.core.interfaces.pump.ble.BleTransport
 import app.aaps.core.keys.BooleanComposedKey
+import app.aaps.di.ResetGraphRule
+import app.aaps.di.testGraphs
 import app.aaps.e2e.DanaRsEmulatorUiTest.Companion.MAX_DAILY_UNITS
 import app.aaps.pump.dana.emulator.ReviewRecordCodes
 import app.aaps.pump.dana.keys.DanaStringComposedKey
 import app.aaps.pump.dana.keys.DanaStringNonKey
 import app.aaps.pump.danars.DanaRSPlugin
+import app.aaps.pump.danars.di.DanaRSAccessors
 import app.aaps.pump.danars.emulator.EmulatorBleTransport
 import app.aaps.testcategories.ShardA
 import com.google.common.truth.Truth.assertThat
@@ -385,16 +384,18 @@ class DanaRsEmulatorUiTest : AbstractDanaEmulatorUiTest() {
         openVia("User options", expect = SAVE_USER_OPTIONS)
 
         val before = emulator.pumpState.lcdOnTimeSec
-        // Three steppers share the "Increase" description (LCD on time, Backlight on time,
-        // Shutdown); they are laid out in that order, so the first is LCD's. Its range is 5-240, so
-        // one step up is always in bounds.
-        withStaleRetry { device.findObjects(byDesc("Increase")).first().click() }
+        // Three plus steppers are on this screen (LCD on time, Backlight on time, Shutdown); they are
+        // laid out in that order, so the first is LCD's. Its range is 5-240, so one step up is always
+        // in bounds.
+        withStaleRetry { device.findObjects(byDescContains(INCREMENT)).first().click() }
         click(SAVE_USER_OPTIONS)
 
         // Asserts only that it grew, not by how much: the step is the screen's business (5 today),
         // and pinning it here would fail this test for a UI tweak that broke nothing.
         val written = awaitTrue(SAVE_TIMEOUT) { emulator.pumpState.lcdOnTimeSec > before }
         assertThat(written).isTrue()
+        // The pump has the value before the save leaves the queue, and the screen keeps redrawing until it does.
+        waitForQueueIdle()
 
         // Saving may leave the screen on its own; only tap Back if it did not.
         if (!waitForVisible("Unpair", IDLE_MS)) returnToDanaOverview()

@@ -8,11 +8,11 @@ import app.aaps.core.data.model.GlucoseUnit
 import app.aaps.core.data.model.TT
 import app.aaps.core.data.model.TTPreset
 import app.aaps.core.data.ue.Sources
-import app.aaps.core.interfaces.concurrent.aapsIoDispatcher
 import app.aaps.core.interfaces.bolus.BatchAction
 import app.aaps.core.interfaces.bolus.BatchExecutor
 import app.aaps.core.interfaces.clientcontrol.ActionProgress
 import app.aaps.core.interfaces.clientcontrol.isNotDeliveryError
+import app.aaps.core.interfaces.concurrent.aapsIoDispatcher
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.db.PersistenceLayer
 import app.aaps.core.interfaces.db.observeChanges
@@ -35,16 +35,11 @@ import app.aaps.core.ui.CoreUiStrings
 import app.aaps.core.ui.clientcontrol.failText
 import app.aaps.core.ui.compose.ScreenMode
 import app.aaps.core.ui.compose.navigation.icon
-import app.aaps.ui.UiStrings
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.binding
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
-import kotlin.math.abs
-import kotlin.math.roundToInt
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -62,6 +57,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * ViewModel for TempTargetManagementScreen managing TT presets and activation.
@@ -180,6 +179,12 @@ class TempTargetManagementViewModel(
                         editorName = initialPreset?.name ?: "",
                         editorTarget = targetInUserUnits,
                         editorDuration = initialDurationMs,
+                        // The activation time has to be set here, not left to selectPreset: this already assigns
+                        // selectedPreset, so the screen's later selectPreset(index) returns early on "same preset"
+                        // and never runs. Without this the state keeps its 0L default, the screen shows 1/1/70,
+                        // and a user who only changes the time gets a target stamped in 1970 that never runs.
+                        eventTime = dateUtil.now(),
+                        eventTimeChanged = false,
                         showNotesField = showNotes,
                         isLoading = false
                     )

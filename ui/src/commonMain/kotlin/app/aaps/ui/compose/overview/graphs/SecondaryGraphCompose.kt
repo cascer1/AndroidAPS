@@ -10,7 +10,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -22,15 +21,15 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.graph.vico.AdaptiveStep
 import app.aaps.core.graph.vico.Square
-import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.interfaces.overview.graph.BolusType
 import app.aaps.core.interfaces.overview.graph.DeviationType
 import app.aaps.core.interfaces.overview.graph.GraphDataPoint
 import app.aaps.core.interfaces.overview.graph.SeriesType
 import app.aaps.core.interfaces.overview.graph.TreatmentGraphData
-import app.aaps.core.ui.compose.LocalDecimalFormatter
-import app.aaps.core.ui.compose.LocalDateUtil
+import app.aaps.core.interfaces.utils.DecimalFormatter
 import app.aaps.core.ui.compose.AapsTheme
+import app.aaps.core.ui.compose.LocalDateUtil
+import app.aaps.core.ui.compose.LocalDecimalFormatter
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.CartesianDrawingContext
 import com.patrykandpatrick.vico.compose.cartesian.VicoScrollState
@@ -52,18 +51,24 @@ import com.patrykandpatrick.vico.compose.common.component.ShapeComponent
 import com.patrykandpatrick.vico.compose.common.component.TextComponent
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import com.patrykandpatrick.vico.compose.common.data.ExtraStore
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.debounce
 
 /**
  * CartesianChartModelProducer.update() skips notifying receivers (and thus skips recomputing axis
  * ranges) when a transaction's partials AND extraStore are both unchanged from the last one. Since
- * scrolling/zooming re-submits identical series data (only the visible window changed), stashing
- * the visible window here forces the extraStore to differ, so Vico actually reprocesses the
+ * scrolling/zooming re-submits identical series data (only the axis ranges changed), stashing
+ * the axis setup here forces the extraStore to differ, so Vico actually reprocesses the
  * transaction instead of silently dropping it.
  */
-private val VISIBLE_RANGE_KEY = ExtraStore.Key<Pair<Double?, Double?>>()
+private val AXIS_SCALE_KEY = ExtraStore.Key<AxisScale>()
+
+/** The axis setup that a scroll or zoom can change. Equal values mean the axes did not change. */
+private data class AxisScale(
+    val primary: CartesianLayerRangeProvider,
+    val secondary: CartesianLayerRangeProvider,
+    val basal: CartesianLayerRangeProvider,
+    val startAxisItemPlacer: VerticalAxis.ItemPlacer
+)
 
 /**
  * Secondary graphs are much shorter than the BG graph, so Vico's ItemPlacer thins out a denser
@@ -136,7 +141,6 @@ internal class ClampedVerticalAxisItemPlacer(
  * - Simple line series (AbsIOB, BGI, Sensitivity, VarSens, DevSlope, HR, Steps): Colored line with gradient fill
  * - Deviations: Per-type colored step lines with gradient fill (POSITIVE/NEGATIVE/EQUAL/UAM/CSF)
  */
-@OptIn(FlowPreview::class)
 @Composable
 fun SecondaryGraphCompose(
     viewModel: GraphViewModel,
@@ -147,6 +151,8 @@ fun SecondaryGraphCompose(
     nowTimestamp: Long,
     activityOverlay: Boolean = false,
     onVisibleRangeChanged: ((Pair<Double, Double>?) -> Unit)? = null,
+    /** While holding the BG graph, a line at the inspected time. Null turns it off. */
+    inspect: GraphInspectState? = null,
     modifier: Modifier = Modifier
 ) {
     val dateUtil = LocalDateUtil.current
@@ -389,33 +395,26 @@ fun SecondaryGraphCompose(
     // Visible-window bounds (same x-unit as processed* points — minutes from minTimestamp) for
     // windowing the Y-axis scale to only the currently scrolled/zoomed portion of this graph's
     // own chart, instead of the full loaded time range.
-    // The reporter writes into a plain (non-Compose-state) holder on every draw pass — see
-    // VisibleRangeHolder — so we poll it here rather than observing it directly, keeping Compose
-    // state writes off the draw path.
-    // Computed here (before the model-rebuild LaunchedEffect below) so visibleMinX/visibleMaxX can
-    // be included in that effect's keys — Vico only reliably re-applies axis ranges via a real
-    // modelProducer.runTransaction, not merely by swapping the CartesianLayerRangeProvider instance.
+    // The reporter writes into a StateFlow holder (not Compose state) on every draw pass — see
+    // VisibleRangeHolder — and we collect it here, keeping Compose state writes off the draw path.
+    // The axis ranges below are windowed to it, and the model is rebuilt when they change — Vico
+    // only reliably re-applies axis ranges via a real modelProducer.runTransaction, not merely by
+    // swapping the CartesianLayerRangeProvider instance.
     val visibleRangeHolder = remember { VisibleRangeHolder() }
     val visibleRangeReporter = rememberVisibleRangeReporter(visibleRangeHolder)
 
-    var rawVisibleRange by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var visibleRange by remember { mutableStateOf<Pair<Double, Double>?>(null) }
 
+    // Runs only when the range changes. The delay limits updates to 20 per second during
+    // scroll/zoom (each one rebuilds the model); the StateFlow keeps the latest value meanwhile.
     LaunchedEffect(visibleRangeHolder) {
-        while (true) {
+        visibleRangeHolder.value.collect {
+            visibleRange = it
             delay(50)
-            val current = visibleRangeHolder.value
-            if (current != rawVisibleRange) rawVisibleRange = current
         }
     }
 
-    LaunchedEffect(Unit) {
-        snapshotFlow { rawVisibleRange }
-            .debounce(30)
-            .collect { visibleRange = it }
-    }
-
-    // Expose this graph's own (already debounced) visible window upward — used by BgGraphCompose
+    // Expose this graph's own (already throttled) visible window upward — used by BgGraphCompose
     // to window its own axis from this graph's synced scroll/zoom instead of attaching its own
     // decoration (that was tried and found to break BG's own pinch-zoom gesture handling).
     val currentOnVisibleRangeChanged by rememberUpdatedState(onVisibleRangeChanged)
@@ -482,69 +481,6 @@ fun SecondaryGraphCompose(
     }
     val hasPrimaryData = primarySeries.isNotEmpty()
 
-    LaunchedEffect(
-        processedSimpleSeries,
-        processedDevSlopeMin,
-        processedDeviationLines,
-        processedIob,
-        processedIobTreatments,
-        processedCob,
-        processedCarbs,
-        processedBasalProfile,
-        processedBasalActual,
-        processedSecondary,
-        processedActivityOverlay,
-        maxX,
-        visibleMinX,
-        visibleMaxX
-    ) {
-        // Always populate the model — even with no data / no real time range — so the chart frame
-        // (axes, grid, now-line) renders the empty-state normalizer series instead of staying blank.
-        // (Matches TreatmentBeltGraphCompose.) When data is absent the processed* lists are empty,
-        // so only the normalizer is emitted; the primary range provider anchors an empty 0..1 axis.
-        modelProducer.runTransaction {
-            // Primary line layer — emit in the exact order of `primarySeries` so the line styles
-            // (built from the same list) map 1:1 to the series.
-            lineModel {
-                primarySeries.forEach { spec -> series(x = spec.x, y = spec.y) }
-                // Normalizer — ensures identical maxPointSize across all charts
-                series(x = normalizerX(maxX), y = NORMALIZER_Y)
-            }
-
-            // Block 2 → Basal layer (end axis, flipped) OR secondary series layer (end axis)
-            if (hasBasalLayer) {
-                lineModel {
-                    if (processedBasalActual.size >= 2) {
-                        series(x = processedBasalActual.map { it.first }, y = processedBasalActual.map { it.second })
-                    } else {
-                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
-                    }
-                    if (processedBasalProfile.size >= 2) {
-                        series(x = processedBasalProfile.map { it.first }, y = processedBasalProfile.map { it.second })
-                    } else {
-                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
-                    }
-                }
-            } else if (isDualAxis) {
-                lineModel {
-                    if (processedSecondary.isNotEmpty()) {
-                        series(x = processedSecondary.map { it.first }, y = processedSecondary.map { it.second })
-                    } else {
-                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
-                    }
-                    // Normalizer for end axis layer
-                    series(x = normalizerX(maxX), y = NORMALIZER_Y)
-                }
-            }
-
-            // Forces Vico to reprocess this transaction even when the series data above is
-            // identical to last time (see VISIBLE_RANGE_KEY doc) — otherwise scrolling/zooming
-            // would re-submit the same partials and get silently skipped, never picking up the
-            // updated primaryRangeProvider.
-            extras { it[VISIBLE_RANGE_KEY] = visibleMinX to visibleMaxX }
-        }
-    }
-
     // =========================================================================
     // Line styles
     // =========================================================================
@@ -610,11 +546,11 @@ fun SecondaryGraphCompose(
     // Chart rendering
     // =========================================================================
 
-    val timeFormatter = rememberTimeFormatter(minTimestamp)
     val bottomAxisItemPlacer = rememberBottomAxisItemPlacer(minTimestamp)
     val nowLineColor = MaterialTheme.colorScheme.onSurface
     val nowLine = rememberNowLine(minTimestamp, nowTimestamp, nowLineColor)
-    val decorations = remember(nowLine, visibleRangeReporter) { listOf(nowLine, visibleRangeReporter) }
+    val inspectLine = rememberInspectLine(inspect)
+    val decorations = remember(nowLine, visibleRangeReporter, inspectLine) { listOfNotNull(nowLine, visibleRangeReporter, inspectLine) }
 
     // Union of Y values across all primary-layer series (IOB, COB, simple series, DevSlope-min,
     // deviation lines), windowed to the visible scroll/zoom range — computed once here since the
@@ -860,6 +796,71 @@ fun SecondaryGraphCompose(
             else               -> stepPlacer
         }
     }
+
+    // Rebuilt only when the data or the axes change, not on every scroll step
+    val axisScale = AxisScale(primaryRangeProvider, secondaryRangeProvider, basalRangeProvider, startAxisItemPlacer)
+    LaunchedEffect(
+        processedSimpleSeries,
+        processedDevSlopeMin,
+        processedDeviationLines,
+        processedIob,
+        processedIobTreatments,
+        processedCob,
+        processedCarbs,
+        processedBasalProfile,
+        processedBasalActual,
+        processedSecondary,
+        processedActivityOverlay,
+        maxX,
+        axisScale
+    ) {
+        // Always populate the model — even with no data / no real time range — so the chart frame
+        // (axes, grid, now-line) renders the empty-state normalizer series instead of staying blank.
+        // (Matches TreatmentBeltGraphCompose.) When data is absent the processed* lists are empty,
+        // so only the normalizer is emitted; the primary range provider anchors an empty 0..1 axis.
+        modelProducer.runTransaction {
+            // Primary line layer — emit in the exact order of `primarySeries` so the line styles
+            // (built from the same list) map 1:1 to the series.
+            lineModel {
+                primarySeries.forEach { spec -> series(x = spec.x, y = spec.y) }
+                // Normalizer — ensures identical maxPointSize across all charts
+                series(x = normalizerX(maxX), y = NORMALIZER_Y)
+            }
+
+            // Block 2 → Basal layer (end axis, flipped) OR secondary series layer (end axis)
+            if (hasBasalLayer) {
+                lineModel {
+                    if (processedBasalActual.size >= 2) {
+                        series(x = processedBasalActual.map { it.first }, y = processedBasalActual.map { it.second })
+                    } else {
+                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
+                    }
+                    if (processedBasalProfile.size >= 2) {
+                        series(x = processedBasalProfile.map { it.first }, y = processedBasalProfile.map { it.second })
+                    } else {
+                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
+                    }
+                }
+            } else if (isDualAxis) {
+                lineModel {
+                    if (processedSecondary.isNotEmpty()) {
+                        series(x = processedSecondary.map { it.first }, y = processedSecondary.map { it.second })
+                    } else {
+                        series(x = listOf(0.0, 1.0), y = listOf(0.0, 0.0))
+                    }
+                    // Normalizer for end axis layer
+                    series(x = normalizerX(maxX), y = NORMALIZER_Y)
+                }
+            }
+
+            // Forces Vico to reprocess this transaction even when the series data above is
+            // identical to last time (see AXIS_SCALE_KEY doc) — otherwise scrolling/zooming
+            // would re-submit the same partials and get silently skipped, never picking up the
+            // updated primaryRangeProvider.
+            extras { it[AXIS_SCALE_KEY] = axisScale }
+        }
+    }
+
     val startAxis = VerticalAxis.rememberStart(
         itemPlacer = startAxisItemPlacer,
         label = rememberTextComponent(
@@ -868,12 +869,12 @@ fun SecondaryGraphCompose(
         ),
         guideline = LineComponent(fill = Fill(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
     )
+    // No time labels: the BG graph above shows them, and the hour lines stay aligned with it.
+    // This keeps the graphs below BG compact.
     val bottomAxis = HorizontalAxis.rememberBottom(
-        valueFormatter = timeFormatter,
         itemPlacer = bottomAxisItemPlacer,
-        label = rememberTextComponent(
-            style = TextStyle(color = MaterialTheme.colorScheme.onSurface)
-        ),
+        label = null,
+        tick = null,
         guideline = LineComponent(fill = Fill(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
     )
 

@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlin.concurrent.Volatile
 import app.aaps.core.data.configuration.Constants
 import app.aaps.core.graph.vico.Square
 import app.aaps.core.interfaces.overview.graph.ActivityGraphData
@@ -26,8 +25,8 @@ import app.aaps.core.interfaces.overview.graph.BgType
 import app.aaps.core.interfaces.overview.graph.EpsGraphPoint
 import app.aaps.core.interfaces.overview.graph.SeriesType
 import app.aaps.core.interfaces.overview.graph.TargetLineData
-import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.AapsTheme
+import app.aaps.core.ui.compose.LocalDateUtil
 import app.aaps.core.ui.compose.icons.IcProfile
 import com.patrykandpatrick.vico.compose.cartesian.CartesianChartHost
 import com.patrykandpatrick.vico.compose.cartesian.VicoScrollState
@@ -39,6 +38,7 @@ import com.patrykandpatrick.vico.compose.cartesian.data.CartesianChartModelProdu
 import com.patrykandpatrick.vico.compose.cartesian.data.CartesianLayerRangeProvider
 import com.patrykandpatrick.vico.compose.cartesian.data.lineModel
 import com.patrykandpatrick.vico.compose.cartesian.decoration.HorizontalBox
+import com.patrykandpatrick.vico.compose.cartesian.marker.CartesianMarkerController
 import com.patrykandpatrick.vico.compose.cartesian.layer.LineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.layer.rememberLineCartesianLayer
 import com.patrykandpatrick.vico.compose.cartesian.rememberCartesianChart
@@ -48,6 +48,7 @@ import com.patrykandpatrick.vico.compose.common.component.ShapeComponent
 import com.patrykandpatrick.vico.compose.common.component.TextComponent
 import com.patrykandpatrick.vico.compose.common.component.rememberTextComponent
 import com.patrykandpatrick.vico.compose.common.data.ExtraStore
+import kotlin.concurrent.Volatile
 
 /** Series identifiers */
 /** Basal on BG graph — deprecated, now shown as flipped overlay on IOB graph. Set to true to restore. */
@@ -118,6 +119,8 @@ fun BgGraphCompose(
     derivedTimeRange: Pair<Long, Long>?,
     nowTimestamp: Long,
     visibleTimeRange: Pair<Long, Long>? = null,
+    /** Press and hold to see the values at a reading. Null turns it off. */
+    inspect: GraphInspectState? = null,
     modifier: Modifier = Modifier
 ) {
     val dateUtil = LocalDateUtil.current
@@ -574,7 +577,12 @@ fun BgGraphCompose(
         )
     }
 
-    val decorations = remember(inRangeBox, nowLine) { listOf(inRangeBox, nowLine) }
+    val inspectMarker = remember(inspect) { inspect?.let { GraphInspectMarker(it) } }
+    // Always called, so the composable calls do not depend on inspect
+    val defaultMarkerController = CartesianMarkerController.rememberShowOnPress()
+    val inspectLine = rememberInspectLine(inspect)
+
+    val decorations = remember(inRangeBox, nowLine, inspectLine) { listOfNotNull(inRangeBox, nowLine, inspectLine) }
 
     // =========================================================================
     // Range providers — hoisted out of rememberCartesianChart so keys are re-evaluated on recomposition
@@ -639,7 +647,10 @@ fun BgGraphCompose(
                 guideline = LineComponent(fill = Fill(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)))
             ),
             decorations = decorations,
-            getXStep = { _, _, _ -> 1.0 }
+            getXStep = { _, _, _ -> 1.0 },
+            marker = inspectMarker,
+            markerVisibilityListener = inspect?.visibilityListener,
+            markerController = inspect?.controller ?: defaultMarkerController
         ),
         modelProducer = modelProducer,
         modifier = modifier.fillMaxWidth(),

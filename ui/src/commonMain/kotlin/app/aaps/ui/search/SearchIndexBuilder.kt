@@ -3,11 +3,13 @@ package app.aaps.ui.search
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.plugin.ActivePlugin
+import app.aaps.core.interfaces.plugin.EnforcedState
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.resources.TextResolver
 import app.aaps.core.keys.interfaces.PreferenceKey
 import app.aaps.core.keys.interfaces.Preferences
 import app.aaps.core.keys.interfaces.TextRef
+import app.aaps.core.keys.interfaces.VisibilityContext
 import app.aaps.core.ui.compose.preference.PreferenceSubScreenDef
 import app.aaps.core.ui.search.SearchableItem
 import app.aaps.core.ui.search.SearchableProvider
@@ -31,7 +33,8 @@ class SearchIndexBuilder(
     private val providers: Set<SearchableProvider>,
     private val preferences: Preferences,
     private val config: Config,
-    private val rh: TextResolver
+    private val rh: TextResolver,
+    private val visibilityContext: VisibilityContext
 ) {
 
     private var cachedIndex: List<SearchIndexEntry>? = null
@@ -135,6 +138,7 @@ class SearchIndexBuilder(
         // 2. Collect from SearchableProviders (built-in screens, dialogs)
         providers.forEach { provider ->
             provider.getSearchableItems().forEach { item ->
+                if (item is SearchableItem.Category && !item.screenDef.isShown()) return@forEach
                 addIfNew(createIndexEntry(item))
             }
         }
@@ -153,6 +157,14 @@ class SearchIndexBuilder(
      * the master and can't be changed or configured locally — so BG source plugins, their settings
      * screens and their keys stay out of search there too (mirrors ConfigurationViewModel's gate).
      */
+    /**
+     * Same rule as the preference screen: a screen is hidden when an item marked
+     * `hideParentScreenIfHidden` is hidden by its own visibility rule (e.g. the Prime/Fill presets
+     * on a pump that cannot be primed from AAPS).
+     */
+    private fun PreferenceSubScreenDef.isShown(): Boolean =
+        items.none { it is PreferenceKey && it.hideParentScreenIfHidden && !it.visibility.isVisible(visibilityContext) }
+
     private fun PluginBase.categoryAvailable(): Boolean =
         !(preferences.nsclientMode && pluginDescription.mainType == PluginType.BGSOURCE)
 
@@ -162,17 +174,17 @@ class SearchIndexBuilder(
      * row drops out of search.
      */
     private fun PluginBase.isListVisible(): Boolean =
-        categoryAvailable() && showInList(pluginDescription.mainType) && pluginDescription.pluginName != null
+        categoryAvailable() && showInList() && pluginDescription.pluginName != null
 
     /**
      * A plugin's settings (screen/category and individual preference keys) are searchable when the
-     * plugin is list-visible or permanently enabled. alwaysEnabled plugins (e.g. Safety) are hidden
+     * plugin is list-visible or enforced ENABLED. Enforced plugins (e.g. Safety) are hidden
      * from the Config Builder list only because they cannot be toggled — their settings are still
-     * user-facing and shown in Preferences. VirtualPump on a client is hidden and not alwaysEnabled,
+     * user-facing and shown in Preferences. VirtualPump on a client is hidden and not enforced,
      * so its settings stay out of search — the values come from the master and aren't editable locally.
      */
     private fun PluginBase.hasSearchableSettings(): Boolean =
-        categoryAvailable() && (showInList(pluginDescription.mainType) || pluginDescription.alwaysEnabled) && pluginDescription.pluginName != null
+        categoryAvailable() && (showInList() || enforcedState() == EnforcedState.Enabled) && pluginDescription.pluginName != null
 
     private fun collectPlugins(entries: MutableList<SearchIndexEntry>, seenKeys: MutableSet<String>) {
         activePlugin.getPluginsList()
@@ -209,7 +221,7 @@ class SearchIndexBuilder(
 
     private fun collectNestedScreens(screen: PreferenceSubScreenDef, plugin: PluginBase, entries: MutableList<SearchIndexEntry>, seenKeys: MutableSet<String>) {
         screen.items.forEach { item ->
-            if (item is PreferenceSubScreenDef) {
+            if (item is PreferenceSubScreenDef && item.isShown()) {
                 val screenItem = SearchableItem.Category(item, ownerPlugin = plugin)
                 val entry = createIndexEntry(screenItem)
                 val uniqueKey = "${entry.category.name}_${entry.item.key}"
@@ -238,6 +250,9 @@ class SearchIndexBuilder(
             if (preferences.apsMode && !prefKey.showInApsMode) return@forEach
             if (preferences.nsclientMode && !prefKey.showInNsClientMode) return@forEach
             if (preferences.pumpControlMode && !prefKey.showInPumpControlMode) return@forEach
+            // The key's own runtime rule, as on the preference screen (e.g. insulin age on a patch pump,
+            // battery age on a pump without a replaceable battery).
+            if (!prefKey.visibility.isVisible(visibilityContext)) return@forEach
 
             val parentInfo = parentScreenMap[prefKey.key]
             // Skip keys whose owning plugin has no searchable settings (e.g. VirtualPump on a client — its

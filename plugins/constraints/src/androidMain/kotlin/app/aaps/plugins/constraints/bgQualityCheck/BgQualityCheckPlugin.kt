@@ -1,7 +1,6 @@
 package app.aaps.plugins.constraints.bgQualityCheck
 
-import app.aaps.core.interfaces.notifications.NotificationManager
-import app.aaps.plugins.constraints.ConstraintsStrings
+import app.aaps.core.data.model.needsFlatBgCheck
 import app.aaps.core.data.plugin.PluginType
 import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.bgQualityCheck.BgQualityCheck
@@ -10,14 +9,16 @@ import app.aaps.core.interfaces.constraints.PluginConstraints
 import app.aaps.core.interfaces.iob.IobCobCalculator
 import app.aaps.core.interfaces.logging.AAPSLogger
 import app.aaps.core.interfaces.logging.LTag
+import app.aaps.core.interfaces.notifications.NotificationManager
+import app.aaps.core.interfaces.plugin.EnforcedState
 import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginDescription
-import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.resources.TextResolver
 import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.collectResilient
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
 import app.aaps.core.interfaces.utils.DateUtil
-import app.aaps.core.keys.interfaces.TextRef
+import app.aaps.plugins.constraints.ConstraintsStrings
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
@@ -42,7 +43,7 @@ import kotlin.math.min
 @Inject
 class BgQualityCheckPlugin(
     aapsLogger: AAPSLogger,
-    override val rh: ResourceHelper,
+    override val rh: TextResolver,
     private val rxBus: RxBus,
     private val iobCobCalculator: IobCobCalculator,
     private val dateUtil: DateUtil,
@@ -50,7 +51,7 @@ class BgQualityCheckPlugin(
 ) : PluginBase(
     PluginDescription()
         .mainType(PluginType.CONSTRAINTS)
-        .alwaysEnabled(true)
+        .enforce(EnforcedState.Enabled)
         .showInList { false }
         .pluginName(ConstraintsStrings.bg_quality),
     aapsLogger, rh, notificationManager
@@ -111,7 +112,7 @@ class BgQualityCheckPlugin(
                     message = rh.gs(ConstraintsStrings.bg_too_close, dateUtil.dateAndTimeAndSecondsString(readings[i].timestamp), dateUtil.dateAndTimeAndSecondsString(readings[i + 1].timestamp))
                     return
                 }
-        if (lastBg?.sourceSensor?.isLibre1() == true && isBgFlatForInterval(staleBgCheckPeriodMinutes, staleBgMaxDeltaMgdl) == true) {
+        if (lastBg?.sourceSensor?.needsFlatBgCheck() == true && isBgFlatForInterval(staleBgCheckPeriodMinutes, staleBgMaxDeltaMgdl) == true) {
             state = BgQualityCheck.State.FLAT
             message = rh.gs(ConstraintsStrings.a11y_bg_quality_flat)
         } else if (iobCobCalculator.ads.lastUsed5minCalculation == true) {

@@ -45,6 +45,7 @@ import app.aaps.pump.carelevo.coordinator.CarelevoAlarmClearCoordinator
 import app.aaps.pump.carelevo.domain.model.ResponseResult
 import app.aaps.pump.carelevo.domain.model.infusion.CarelevoInfusionInfoDomainModel
 import app.aaps.pump.carelevo.domain.model.patch.CarelevoPatchInfoDomainModel
+import app.aaps.pump.carelevo.domain.repository.CarelevoPatchInfoRepository
 import app.aaps.pump.carelevo.domain.usecase.infusion.CarelevoDeleteInfusionInfoUseCase
 import app.aaps.pump.carelevo.domain.usecase.infusion.model.CarelevoDeleteInfusionRequestModel
 import app.aaps.pump.carelevo.domain.usecase.patch.CarelevoPatchForceDiscardUseCase
@@ -53,6 +54,7 @@ import app.aaps.pump.carelevo.presentation.model.CarelevoOverviewUiModel
 import app.aaps.pump.carelevo.presentation.type.CarelevoScreenType
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.binding
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
 import io.reactivex.rxjava3.core.Observable
@@ -71,24 +73,21 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlin.time.Clock
-import kotlin.time.Instant
-import kotlin.time.Duration.Companion.days
-import kotlin.time.Duration.Companion.hours
-import kotlin.time.Duration.Companion.minutes
-import kotlin.time.Duration.Companion.seconds
 import java.math.RoundingMode
-import java.time.Instant as JavaInstant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import dev.zacsweers.metro.Inject
 import kotlin.jvm.optionals.getOrNull
+import kotlin.time.Clock
+import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.Instant
 import app.aaps.core.interfaces.R as InterfacesR
 import app.aaps.core.ui.R as CoreUiR
+import java.time.Instant as JavaInstant
 
 @ContributesIntoMap(AppScope::class, binding = binding<ViewModel>())
 @ViewModelKey
@@ -104,6 +103,7 @@ class CarelevoOverviewViewModel @Inject constructor(
     private val aapsSchedulers: AapsSchedulers,
     private val patchForceDiscardUseCase: CarelevoPatchForceDiscardUseCase,
     private val carelevoDeleteInfusionInfoUseCase: CarelevoDeleteInfusionInfoUseCase,
+    private val patchInfoRepository: CarelevoPatchInfoRepository,
     private val rxBus: RxBus,
     private val decimalFormatter: DecimalFormatter
 ) : ViewModel() {
@@ -345,7 +345,9 @@ class CarelevoOverviewViewModel @Inject constructor(
             .observeOn(aapsSchedulers.main)
             .subscribe {
                 val infusionInfo = it.getOrNull() ?: run {
-                    val patchInfo = carelevoPatch.patchInfo.value?.getOrNull() ?: return@subscribe
+                    // The stored record, not carelevoPatch.patchInfo: that stream follows the store a moment later,
+                    // so right after a discard it still held the old patch and the wizard reopened at the needle step.
+                    val patchInfo = patchInfoRepository.getPatchInfoBySync() ?: return@subscribe
                     if (patchInfo.checkNeedle == true) {
                         _isCheckScreen.tryEmit(CarelevoScreenType.NEEDLE_INSERTION)
                     }

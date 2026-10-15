@@ -1,10 +1,7 @@
 package app.aaps.workflow
 
-import app.aaps.core.objects.workflow.WorkOutcome
-import kotlinx.coroutines.test.TestScope
-import androidx.work.ListenableWorker
-import androidx.work.WorkerParameters
-import androidx.work.workDataOf
+import app.aaps.core.data.model.CA
+import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.aps.AutosensData
 import app.aaps.core.interfaces.aps.AutosensDataStore
 import app.aaps.core.interfaces.aps.Sensitivity
@@ -19,16 +16,19 @@ import app.aaps.core.interfaces.rx.bus.RxBus
 import app.aaps.core.interfaces.rx.events.EventBucketedDataCreated
 import app.aaps.core.interfaces.workflow.CalculationSignalsEmitter
 import app.aaps.core.interfaces.workflow.CalculationWorkflow.ProgressData
+import app.aaps.core.objects.workflow.WorkOutcome
 import app.aaps.shared.tests.TestBaseWithProfile
+import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.mockito.Mock
 import org.mockito.kotlin.any
-import org.mockito.kotlin.anyOrNull
 import org.mockito.kotlin.eq
 import org.mockito.kotlin.mock
+import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
 import org.mockito.kotlin.whenever
 import kotlin.test.assertIs
@@ -46,7 +46,6 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
     @Mock lateinit var cache: OverviewDataCache
     @Mock lateinit var overviewData: OverviewData
     @Mock lateinit var signals: CalculationSignalsEmitter
-    @Mock lateinit var workerParameters: WorkerParameters
 
     private val autosensDataProvider = { mock<AutosensData>() }
 
@@ -76,7 +75,6 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
 
     @BeforeEach
     fun setup() {
-        whenever(workerParameters.inputData).thenReturn(workDataOf())
         whenever(dataIobCob.ads).thenReturn(dataAds)
         whenever(dataAds.clone()).thenReturn(dataAds)
         whenever(dataAds.dataLock).thenReturn(AapsLock())
@@ -94,15 +92,57 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
         whenever(profileFunction.getProfile(any())).thenReturn(null)
         whenever(dataAds.getLastAutosensData(any(), any(), any())).thenReturn(null)
         whenever(persistenceLayer.getBgReadingsDataFromTimeToTime(any(), any(), any())).thenReturn(emptyList())
-        whenever(persistenceLayer.getApsResults(any(), any())).thenReturn(emptyList())
+        whenever(persistenceLayer.getVariableSensitivities(any(), any())).thenReturn(emptyList())
         whenever(persistenceLayer.getTemporaryTargetActiveAt(any())).thenReturn(null)
         whenever(dataIobCob.calculateIobArrayForSMB(any(), any(), any(), any())).thenReturn(emptyArray())
         whenever(dataIobCob.iobArrayToString(any())).thenReturn("")
     }
 
+    private fun carbsAt(vararg timestamps: Long) = timestamps.map { CA(timestamp = it, amount = 10.0, duration = 0) }
+
+    @Test
+    fun `a bucket takes the carbs of its own five minutes`() {
+        val bgTime = T.mins(60).msecs()
+        val all = carbsAt(
+            bgTime - T.mins(5).msecs(),          // the previous bucket's boundary - not this one
+            bgTime - T.mins(5).msecs() + 1,      // first millisecond of this bucket
+            bgTime - T.mins(2).msecs(),          // plainly inside
+            bgTime,                              // this bucket's own boundary
+            bgTime + 1                           // already the next bucket
+        )
+
+        val picked = runner().carbsForBucket(all, bgTime).map { it.timestamp }
+
+        assertThat(picked).containsExactly(
+            bgTime - T.mins(5).msecs() + 1,
+            bgTime - T.mins(2).msecs(),
+            bgTime
+        ).inOrder()
+    }
+
+    @Test
+    fun `neighbouring buckets never both count the same carb`() {
+        // The #4596 property, and the reason for the +1. Walk a carb across a whole bucket, one second at
+        // a time, and no position may be claimed by both buckets - nor, on the shared boundary, by the
+        // wrong one.
+        val bgTime = T.mins(60).msecs()
+        val previous = bgTime - T.mins(5).msecs()
+        for (offset in 0..300) {
+            val carb = carbsAt(previous + offset * 1000L)
+            val inPrevious = runner().carbsForBucket(carb, previous).size
+            val inCurrent = runner().carbsForBucket(carb, bgTime).size
+            assertThat(inPrevious + inCurrent).isEqualTo(1)
+        }
+    }
+
+    @Test
+    fun `an empty span yields nothing`() {
+        assertThat(runner().carbsForBucket(emptyList(), T.mins(60).msecs())).isEmpty()
+    }
+
     @Test
     fun `missing or stale chain data returns failure`() = runTest {
-        whenever(workflowChainData.prepareFor(anyOrNull(), any())).thenReturn(null)
+        whenever(workflowChainData.prepareFor(any(), any())).thenReturn(null)
 
         assertIs<WorkOutcome.Failure>(run())
     }
@@ -110,7 +150,7 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
     @Test
     fun `full run traverses all phases and emits progress`() = runTest {
         stubSuspendCalls()
-        whenever(workflowChainData.prepareFor(anyOrNull(), any())).thenReturn(buildData(bgDataReload = false, emitFinalProgress = true))
+        whenever(workflowChainData.prepareFor(any(), any())).thenReturn(buildData(bgDataReload = false, emitFinalProgress = true))
 
         val result = run()
 
@@ -123,14 +163,16 @@ class PrepareGraphDataRunnerTest : TestBaseWithProfile() {
     @Test
     fun `bg data reload phase loads, smooths and signals bucketed data`() = runTest {
         stubSuspendCalls()
-        whenever(workflowChainData.prepareFor(anyOrNull(), any())).thenReturn(buildData(bgDataReload = true, emitFinalProgress = false))
+        whenever(workflowChainData.prepareFor(any(), any())).thenReturn(buildData(bgDataReload = true, emitFinalProgress = false))
 
         val result = run()
 
         assertIs<WorkOutcome.Success>(result)
         verify(mockedRxBus).send(any<EventBucketedDataCreated>())
-        verify(dataIobCob).clearCache()
+        // The cached IOB is kept for a new BG, only old entries are dropped
+        verify(dataIobCob).bgDataReloaded()
+        verify(dataIobCob, never()).clearCache()
         // Terminal-only progress not emitted when emitFinalProgress = false
-        verify(signals, org.mockito.kotlin.never()).emitProgress(eq(ProgressData.DRAW_FINAL), any())
+        verify(signals, never()).emitProgress(eq(ProgressData.DRAW_FINAL), any())
     }
 }

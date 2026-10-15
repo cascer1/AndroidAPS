@@ -2,6 +2,7 @@ package app.aaps.e2e
 
 import android.Manifest
 import android.content.Context
+import android.graphics.Rect
 import android.os.SystemClock
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
@@ -9,20 +10,23 @@ import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.StaleObjectException
 import androidx.test.uiautomator.UiDevice
 import androidx.test.uiautomator.UiObject2
+import androidx.test.uiautomator.UiObjectNotFoundException
+import androidx.test.uiautomator.UiSelector
 import androidx.work.WorkManager
-import app.aaps.di.testGraphs
 import app.aaps.core.data.ue.Action
 import app.aaps.core.data.ue.Sources
 import app.aaps.core.interfaces.configuration.ExternalOptions
 import app.aaps.core.interfaces.profile.ProfileRepository
-import app.aaps.core.interfaces.queue.CommandQueue
 import app.aaps.core.keys.BooleanKey
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.StringKey
 import app.aaps.core.objects.extensions.singleBlock
 import app.aaps.core.objects.extensions.singleTargetBlock
 import app.aaps.di.EmulatedOptions
+import app.aaps.di.testGraphs
 import app.aaps.e2e.AbstractDanaEmulatorUiTest.Companion.BOLUS_UNITS
+import app.aaps.e2e.AbstractDanaEmulatorUiTest.Companion.DECREMENT
+import app.aaps.e2e.AbstractDanaEmulatorUiTest.Companion.INCREMENT
 import app.aaps.pump.dana.DanaPump
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.runBlocking
@@ -406,10 +410,10 @@ abstract class AbstractDanaEmulatorUiTest {
         assertThat(isTempBasalRunning()).isFalse()
         waitForQueueIdle()
         openManageAction("Temp basal")
-        openVia("Temp basal", expect = "Decrease")   // the TBR dialog (its steppers)
+        openViaDescContains("Temp basal", expect = DECREMENT)   // the TBR dialog (its steppers)
         // Raise the percent above 100 so the confirm button enables; the duration is pre-set to the
-        // pump's step. The first "Increase" stepper is the percent (duration is the second).
-        repeat(TBR_INCREASE_TAPS) { withStaleRetry { device.findObjects(byDesc("Increase")).first().click() } }
+        // pump's step. The first plus stepper is the percent (duration is the second).
+        repeat(TBR_INCREASE_TAPS) { withStaleRetry { device.findObjects(byDescContains(INCREMENT)).first().click() } }
         clickRegex("""\d+\s*%""")   // confirm button, labelled with the chosen percent
         click("OK")                 // ElementConfirmationDialog → commit
         val applied = awaitTrue(COMMAND_TIMEOUT) {
@@ -427,9 +431,9 @@ abstract class AbstractDanaEmulatorUiTest {
         assertThat(isExtendedBolusRunning()).isFalse()
         waitForQueueIdle()
         openManageAction("Extended bolus")
-        openVia("Extended bolus", expect = "Decrease")
-        // First "Increase" stepper is the insulin amount; raise it above 0 to enable the confirm.
-        repeat(EXTENDED_INCREASE_TAPS) { withStaleRetry { device.findObjects(byDesc("Increase")).first().click() } }
+        openViaDescContains("Extended bolus", expect = DECREMENT)
+        // First plus stepper is the insulin amount; raise it above 0 to enable the confirm.
+        repeat(EXTENDED_INCREASE_TAPS) { withStaleRetry { device.findObjects(byDescContains(INCREMENT)).first().click() } }
         clickRegex("""\d+\.\d+\s*U""")   // confirm button, labelled with the chosen amount
         click("OK")
         val applied = awaitTrue(COMMAND_TIMEOUT) {
@@ -463,6 +467,18 @@ abstract class AbstractDanaEmulatorUiTest {
     protected fun byDesc(s: String): BySelector =
         By.desc(Pattern.compile(Pattern.quote(s), Pattern.CASE_INSENSITIVE))
 
+    /**
+     * Like [byDesc], but matches any content description that *contains* [s].
+     *
+     * A [Pattern] in a [BySelector] is a whole-string match, and the number steppers are no longer
+     * described by a fixed English word: their description is localized and carries the field label
+     * and the step, e.g. "increment Temp basal by 10" (`a11y_plus_button_description`). So [DECREMENT]
+     * and [INCREMENT] can only be matched as a part of the description. [byDesc] stays exact — the
+     * other call sites rely on that.
+     */
+    protected fun byDescContains(s: String): BySelector =
+        By.desc(Pattern.compile(".*" + Pattern.quote(s) + ".*", Pattern.CASE_INSENSITIVE or Pattern.DOTALL))
+
     protected fun find(label: String, timeout: Long = STEP_TIMEOUT): UiObject2 {
         val end = SystemClock.uptimeMillis() + timeout
         while (SystemClock.uptimeMillis() < end) {
@@ -478,14 +494,36 @@ abstract class AbstractDanaEmulatorUiTest {
      *
      * `UiObject2.click` re-reads the accessibility node when it runs, so the node has to survive the whole
      * gesture. On a screen that recomposes continuously - the Dana overview updates as the pump talks - it
-     * often does not, and every attempt throws StaleObjectException, so even ten retries all fail (seen in
-     * CI as DanaRsEmulatorUiTest dying in returnToDanaOverview). Reading the bounds can still go stale and
-     * is retried, but once the Rect is in hand the tap itself cannot.
+     * often does not, and every attempt throws StaleObjectException. Reading the bounds of a node from [find]
+     * has the same gap: in CI it went stale on every one of ten tries (DanaRsEmulatorUiTest dying in
+     * returnToDanaOverview). So the node is found and its bounds are read in one call ([boundsOf]). Once the
+     * Rect is in hand the tap cannot go stale.
      */
-    protected fun click(label: String) = withStaleRetry {
-        val node = find(label)
-        val bounds = node.visibleBounds
+    protected fun click(label: String) {
+        val bounds = boundsOf(label)
         device.click(bounds.centerX(), bounds.centerY())
+    }
+
+    /**
+     * The bounds of [label], matched by text or content-desc like [find], but through the older `UiObject`: it
+     * looks the node up at the moment it is asked, so there is no handle that can go stale.
+     */
+    private fun boundsOf(label: String, timeout: Long = STEP_TIMEOUT): Rect {
+        val whole = "(?i)" + Pattern.quote(label)
+        val end = SystemClock.uptimeMillis() + timeout
+        while (SystemClock.uptimeMillis() < end) {
+            for (selector in listOf(UiSelector().textMatches(whole), UiSelector().descriptionMatches(whole))) {
+                val node = device.findObject(selector)
+                // exists() does not wait, so a label that is only a content-desc does not wait out the text lookup.
+                if (node.exists()) try {
+                    return node.visibleBounds
+                } catch (_: UiObjectNotFoundException) {
+                    // Gone between the two calls: look again.
+                }
+            }
+            device.waitForIdle(IDLE_MS)
+        }
+        error("Timed out after ${timeout}ms looking for '$label'")
     }
 
     /**
@@ -527,10 +565,29 @@ abstract class AbstractDanaEmulatorUiTest {
         error("'$expect' not visible after $attempts taps on '$open'")
     }
 
+    /** [openVia] for a screen recognised by a content description that only *contains* [expect] (see [byDescContains]). */
+    protected fun openViaDescContains(open: String, expect: String, attempts: Int = 4) {
+        repeat(attempts) {
+            click(open)
+            if (waitForDescContains(expect)) return
+        }
+        error("no description containing '$expect' after $attempts taps on '$open'")
+    }
+
     protected fun waitForVisible(label: String, timeout: Long = STEP_TIMEOUT): Boolean {
         val end = SystemClock.uptimeMillis() + timeout
         while (SystemClock.uptimeMillis() < end) {
             if (device.findObject(byText(label)) != null || device.findObject(byDesc(label)) != null) return true
+            device.waitForIdle(IDLE_MS)
+        }
+        return false
+    }
+
+    /** [waitForVisible] for a content description that only *contains* [desc] (see [byDescContains]). */
+    protected fun waitForDescContains(desc: String, timeout: Long = STEP_TIMEOUT): Boolean {
+        val end = SystemClock.uptimeMillis() + timeout
+        while (SystemClock.uptimeMillis() < end) {
+            if (device.findObject(byDescContains(desc)) != null) return true
             device.waitForIdle(IDLE_MS)
         }
         return false
@@ -576,6 +633,12 @@ abstract class AbstractDanaEmulatorUiTest {
 
         /** `core.ui.R.string.pump_management` — the Manage sheet's entry onto the active pump. */
         private const val PUMP_MANAGEMENT = "Pump"
+
+        // The first word of every number stepper's description (`core.ui.R.string.increment` /
+        // `decrement`, and the start of `a11y_plus_button_description` / `a11y_min_button_description`).
+        // Only usable with byDescContains — see there. Non-private: subclasses tap steppers too.
+        const val INCREMENT = "increment"
+        const val DECREMENT = "decrement"
 
         private const val PROFILE_NAME = "LocalProfile1"
 
