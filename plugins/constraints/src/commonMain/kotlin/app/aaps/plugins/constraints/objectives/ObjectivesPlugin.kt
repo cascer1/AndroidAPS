@@ -1,6 +1,7 @@
 package app.aaps.plugins.constraints.objectives
 
 import app.aaps.core.data.plugin.PluginType
+import app.aaps.core.data.time.T
 import app.aaps.core.interfaces.configuration.Config
 import app.aaps.core.interfaces.constraints.Constraint
 import app.aaps.core.interfaces.constraints.Objectives
@@ -20,6 +21,8 @@ import app.aaps.core.interfaces.plugin.PluginBase
 import app.aaps.core.interfaces.plugin.PluginBaseWithPreferences
 import app.aaps.core.interfaces.plugin.PluginDescription
 import app.aaps.core.interfaces.resources.TextResolver
+import app.aaps.core.interfaces.resources.ResourceHelper
+import app.aaps.core.interfaces.utils.DateUtil
 import app.aaps.core.keys.BooleanNonKey
 import app.aaps.core.keys.IntNonKey
 import app.aaps.core.keys.interfaces.Preferences
@@ -48,6 +51,7 @@ class ObjectivesPlugin(
     override val rh: TextResolver,
     preferences: Preferences,
     config: Config,
+    private val dateUtil: DateUtil,
     val objectives: List<@JvmSuppressWildcards Objective>,
     notificationManager: NotificationManager
 ) : PluginBaseWithPreferences(
@@ -65,6 +69,33 @@ class ObjectivesPlugin(
     ownPreferences = ObjectivesBooleanComposedKey.entries + ObjectivesLongComposedKey.entries,
     aapsLogger, rh, preferences, notificationManager
 ), PluginConstraints, Objectives {
+
+    init {
+        forceCompleteAll()
+    }
+
+    private fun forceCompleteAll() {
+        val pastDate = dateUtil.now() - T.days(30).msecs()
+        for (objective in objectives) {
+            objective.startedOn = pastDate
+            objective.accomplishedOn = pastDate
+            for (task in objective.tasks) {
+                when (task) {
+                    is Objective.ExamTask -> task.answered = true
+                    is Objective.UITask -> task.answered = true
+                }
+            }
+        }
+        preferences.put(BooleanNonKey.ObjectivesBgIsAvailableInNs, true)
+        preferences.put(BooleanNonKey.ObjectivesPumpStatusIsAvailableInNS, true)
+        preferences.put(IntNonKey.ObjectivesManualEnacts, 20)
+        preferences.put(BooleanNonKey.ObjectivesProfileSwitchUsed, true)
+        preferences.put(BooleanNonKey.ObjectivesDisconnectUsed, true)
+        preferences.put(BooleanNonKey.ObjectivesReconnectUsed, true)
+        preferences.put(BooleanNonKey.ObjectivesTempTargetUsed, true)
+        preferences.put(BooleanNonKey.ObjectivesLoopUsed, true)
+        preferences.put(BooleanNonKey.ObjectivesScaleUsed, true)
+    }
 
     fun reset() {
         for (objective in objectives) {
